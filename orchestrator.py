@@ -9,6 +9,10 @@ from policy_engine import PolicyEngine
 from tool_wrappers import ToolWrapperFactory
 
 
+# Tools that ALWAYS require user confirmation, regardless of policy.
+ALWAYS_CONFIRM_TOOLS = {"msf_exploit", "msf_payload", "msf_session", "hydra"}
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -123,6 +127,9 @@ class Orchestrator:
     def _requires_confirmation(self, tool_name: str, params: Dict[str, Any], policy_requested: bool) -> bool:
         if not self.require_user_confirmation:
             return False
+        # Critical tools always require confirmation
+        if tool_name in ALWAYS_CONFIRM_TOOLS:
+            return True
         if policy_requested:
             return True
         if tool_name == "nmap":
@@ -136,7 +143,8 @@ class Orchestrator:
             "scope": self.scope,
             "phase": self.state["phase"],
             "history": self.state["history"][-10:],  # last 10 actions
-            "findings": self.state["findings"]
+            "findings": self.state["findings"],
+            "available_tools": self.tool_factory.list_tools(),
         }
 
     def _generate_report(self):
@@ -147,19 +155,60 @@ class Orchestrator:
         self._emit_progress("report_generated", {"target": self.target})
 
     def _fallback_action(self, prompt_type: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Intelligent fallback chain that progresses through pentest phases."""
         if prompt_type == "analyze":
             return {"findings": []}
+
         tools_run = [item.get("tool") for item in self.state.get("history", []) if item.get("tool")]
+
+        # ── Phase 1: Reconnaissance ──────────────────────────────────
         if "nmap" not in tools_run:
             return {"type": "tool", "tool": "nmap", "params": {"target": self.target, "flags": "-sV"}}
+        if "dns_enum" not in tools_run:
+            return {"type": "tool", "tool": "dns_enum", "params": {"domain": self.target, "type": "std"}}
         if "http_probe" not in tools_run:
             return {"type": "tool", "tool": "http_probe", "params": {"target": self.target, "scheme": "http"}}
+
+        # ── Phase 2: Service Enumeration ─────────────────────────────
+        if "sslscan" not in tools_run:
+            return {"type": "tool", "tool": "sslscan", "params": {"target": self.target}}
+        if "nikto" not in tools_run:
+            return {"type": "tool", "tool": "nikto", "params": {"target": self.target}}
+
+        # ── Phase 3: Discovery & Fuzzing ─────────────────────────────
+        if "gobuster" not in tools_run:
+            return {"type": "tool", "tool": "gobuster", "params": {
+                "url": f"http://{self.target}", "mode": "dir",
+            }}
+        if "ffuf" not in tools_run:
+            return {"type": "tool", "tool": "ffuf", "params": {
+                "url": f"http://{self.target}/FUZZ",
+            }}
+
+        # ── Phase 4: Vulnerability Scanning ──────────────────────────
+        if "nuclei" not in tools_run:
+            return {"type": "tool", "tool": "nuclei", "params": {
+                "target": self.target, "severity": "critical,high,medium",
+            }}
         if "searchsploit" not in tools_run:
             return {"type": "tool", "tool": "searchsploit", "params": {"query": self.target}}
+        if "metasploit_search" not in tools_run:
+            return {"type": "tool", "tool": "metasploit_search", "params": {"query": self.target}}
+
+        # ── Phase 5: Application-specific scanning ───────────────────
         if "wpscan" not in tools_run:
             return {"type": "tool", "tool": "wpscan", "params": {"url": f"http://{self.target}"}}
         if "sqlmap" not in tools_run:
             return {"type": "tool", "tool": "sqlmap", "params": {"url": f"http://{self.target}"}}
+        if "enum4linux" not in tools_run:
+            return {"type": "tool", "tool": "enum4linux", "params": {"target": self.target}}
+
+        # ── Phase 6: Metasploit auxiliary scanning ───────────────────
+        if "msf_auxiliary" not in tools_run:
+            return {"type": "tool", "tool": "msf_auxiliary", "params": {
+                "module": "auxiliary/scanner/smb/smb_version", "rhosts": self.target,
+            }}
+
         return {"type": "complete"}
 
     def _policy_check(self, tool_name: str, params: Dict[str, Any]):

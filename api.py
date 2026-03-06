@@ -7,9 +7,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from run_manager import RunManager
+from wordlist_registry import WordlistRegistry
 
 app = FastAPI(title="Keraunos API", version="0.1.0")
 run_manager = RunManager()
+wordlist_registry = WordlistRegistry()
 
 
 def require_api_key(x_api_key: str = Header(default="")):
@@ -25,6 +27,12 @@ class CreateRunRequest(BaseModel):
     scope: str = Field(default="")
     max_steps: int = Field(default=25, ge=1, le=500)
     policy_path: str = Field(default="policy.json")
+
+
+class RegisterWordlistRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    path: str = Field(..., min_length=1)
+    description: str = Field(default="")
 
 
 @app.get("/health")
@@ -69,3 +77,24 @@ def cancel_run(run_id: str, _: None = Depends(require_api_key)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@app.get("/wordlists")
+def list_wordlists(_: None = Depends(require_api_key)):
+    return {"items": wordlist_registry.list_wordlists()}
+
+
+@app.post("/wordlists")
+def register_wordlist(request: RegisterWordlistRequest, _: None = Depends(require_api_key)):
+    try:
+        return wordlist_registry.register_wordlist(request.name, request.path, request.description)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/wordlists/{name}")
+def delete_wordlist(name: str, _: None = Depends(require_api_key)):
+    removed = wordlist_registry.remove_wordlist(name)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Wordlist not found")
+    return removed

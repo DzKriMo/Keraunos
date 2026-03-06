@@ -2,27 +2,33 @@ from typing import Any, Dict, List
 
 
 class AnalysisEngine:
+    """Deterministic finding extractor for all tool outputs."""
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
     def derive_findings(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         findings = []
         for event in history:
             tool = event.get("tool")
             result = event.get("result", {})
-            if tool == "nmap":
-                findings.extend(self._from_nmap(result))
-            elif tool == "sqlmap":
-                findings.extend(self._from_sqlmap(event.get("params", {}), result))
-            elif tool == "http_probe":
-                findings.extend(self._from_http_probe(result))
-            elif tool == "wpscan":
-                findings.extend(self._from_wpscan(result))
-            elif tool == "searchsploit":
-                findings.extend(self._from_searchsploit(result))
+            params = event.get("params", {})
+            handler = self._handlers.get(tool)
+            if handler:
+                findings.extend(handler(self, params, result))
         return self._dedupe(findings)
 
-    def _from_nmap(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # ------------------------------------------------------------------ #
+    # Tool handler registry
+    # ------------------------------------------------------------------ #
+    _handlers: Dict[str, Any] = {}  # populated below
+
+    # ------------------------------------------------------------------ #
+    # Nmap
+    # ------------------------------------------------------------------ #
+    def _from_nmap(self, params: Dict, result: Dict) -> List[Dict]:
         findings = []
-        ports = result.get("ports", [])
-        for item in ports:
+        for item in result.get("ports", []):
             port = str(item.get("port", ""))
             service = str(item.get("service", "unknown"))
             severity = "Medium"
@@ -30,32 +36,409 @@ class AnalysisEngine:
                 severity = "High"
             if port.startswith(("22/", "3389/")):
                 severity = "Low"
-            findings.append(
-                {
-                    "name": f"Exposed service: {service} on {port}",
-                    "severity": severity,
-                    "description": f"Network scan detected {service} exposed on {port}.",
-                    "evidence": f"nmap reported open port {port} ({service}).",
-                    "remediation": "Restrict service exposure via firewall, ACLs, or service hardening.",
-                }
-            )
+            findings.append({
+                "name": f"Exposed service: {service} on {port}",
+                "severity": severity,
+                "description": f"Network scan detected {service} exposed on {port}.",
+                "evidence": f"nmap reported open port {port} ({service}).",
+                "remediation": "Restrict service exposure via firewall, ACLs, or service hardening.",
+            })
         return findings
 
-    def _from_sqlmap(self, params: Dict[str, Any], result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # ------------------------------------------------------------------ #
+    # SQLMap
+    # ------------------------------------------------------------------ #
+    def _from_sqlmap(self, params: Dict, result: Dict) -> List[Dict]:
         if not result.get("vulnerable"):
             return []
         url = params.get("url", "unknown")
         banner = result.get("banner") or "No DB banner extracted"
-        return [
-            {
-                "name": "Possible SQL Injection",
-                "severity": "High",
-                "description": "sqlmap reported indicators of SQL injection vulnerability.",
-                "evidence": f"Target: {url}. Banner: {banner}.",
-                "remediation": "Use parameterized queries, strict input validation, and WAF protections.",
-            }
-        ]
+        return [{
+            "name": "Possible SQL Injection",
+            "severity": "High",
+            "description": "sqlmap reported indicators of SQL injection vulnerability.",
+            "evidence": f"Target: {url}. Banner: {banner}.",
+            "remediation": "Use parameterized queries, strict input validation, and WAF protections.",
+        }]
 
+    # ------------------------------------------------------------------ #
+    # HTTP Probe
+    # ------------------------------------------------------------------ #
+    def _from_http_probe(self, params: Dict, result: Dict) -> List[Dict]:
+        findings = []
+        status = int(result.get("status_code", 0))
+        hsts = result.get("hsts")
+        server = result.get("server")
+        powered = result.get("x_powered_by")
+        final_url = str(result.get("final_url", ""))
+        original_url = str(result.get("url", ""))
+
+        if original_url.startswith("http://") and final_url.startswith("http://"):
+            findings.append({
+                "name": "HTTP without HTTPS redirect",
+                "severity": "Medium",
+                "description": "Web endpoint appears to serve traffic over HTTP without redirect to HTTPS.",
+                "evidence": f"Requested {original_url}, final URL {final_url}, status {status}.",
+                "remediation": "Enforce HTTPS and add permanent HTTP->HTTPS redirects.",
+            })
+        if final_url.startswith("https://") and not hsts:
+            findings.append({
+                "name": "Missing HSTS header",
+                "severity": "Low",
+                "description": "HTTPS endpoint does not advertise Strict-Transport-Security.",
+                "evidence": f"No HSTS header on {final_url}.",
+                "remediation": "Add Strict-Transport-Security with appropriate max-age and includeSubDomains.",
+            })
+        if server:
+            findings.append({
+                "name": "Server banner disclosure",
+                "severity": "Low",
+                "description": "Server technology banner is exposed in HTTP response headers.",
+                "evidence": f"Server header: {server}",
+                "remediation": "Reduce information disclosure in server headers where feasible.",
+            })
+        if powered:
+            findings.append({
+                "name": "X-Powered-By header disclosure",
+                "severity": "Low",
+                "description": "Application framework information is exposed in response headers.",
+                "evidence": f"X-Powered-By: {powered}",
+                "remediation": "Remove or obfuscate framework-identifying response headers.",
+            })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # WPScan
+    # ------------------------------------------------------------------ #
+    def _from_wpscan(self, params: Dict, result: Dict) -> List[Dict]:
+        findings = []
+        data = result.get("result", {})
+        version = data.get("version", {})
+        if version.get("status") == "insecure":
+            findings.append({
+                "name": "Insecure WordPress version",
+                "severity": "High",
+                "description": "WPScan reports an insecure WordPress core version.",
+                "evidence": f"Detected version: {version.get('number', 'unknown')}",
+                "remediation": "Upgrade WordPress core to the latest secure version.",
+            })
+        for plugin_name, plugin in (data.get("plugins") or {}).items():
+            vulns = plugin.get("vulnerabilities") or []
+            if not vulns:
+                continue
+            findings.append({
+                "name": f"Vulnerable WordPress plugin: {plugin_name}",
+                "severity": "High",
+                "description": "WPScan reported known vulnerabilities in a detected plugin.",
+                "evidence": f"Plugin {plugin_name} vulnerability count: {len(vulns)}.",
+                "remediation": "Update or remove vulnerable plugin versions and harden plugin management.",
+            })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # Searchsploit
+    # ------------------------------------------------------------------ #
+    def _from_searchsploit(self, params: Dict, result: Dict) -> List[Dict]:
+        data = result.get("matches", {})
+        exploits = data.get("RESULTS_EXPLOIT") or []
+        shellcodes = data.get("RESULTS_SHELLCODE") or []
+        total = len(exploits) + len(shellcodes)
+        if total == 0:
+            return []
+        return [{
+            "name": "Public exploit references found",
+            "severity": "Medium",
+            "description": "Exploit-DB correlation found public exploit references related to discovered services/software.",
+            "evidence": f"searchsploit returned {total} references.",
+            "remediation": "Prioritize patching and compensating controls for software with public exploit references.",
+        }]
+
+    # ------------------------------------------------------------------ #
+    # Metasploit Search
+    # ------------------------------------------------------------------ #
+    def _from_metasploit_search(self, params: Dict, result: Dict) -> List[Dict]:
+        modules = result.get("modules", [])
+        if not modules:
+            # Fallback to raw text parsing
+            raw = str(result.get("raw", ""))
+            lines = [line for line in raw.splitlines() if "/" in line and "exploit/" in line]
+            if not lines:
+                return []
+            count = len(lines)
+        else:
+            count = len([m for m in modules if m.get("type") == "exploit"])
+        if count == 0:
+            return []
+        return [{
+            "name": "Metasploit module references found",
+            "severity": "Medium",
+            "description": "Metasploit search returned exploit module references associated with discovered software/services.",
+            "evidence": f"Metasploit exploit modules detected: {count}",
+            "remediation": "Prioritize remediation for software with known exploit module coverage.",
+        }]
+
+    # ------------------------------------------------------------------ #
+    # Metasploit Exploit
+    # ------------------------------------------------------------------ #
+    def _from_msf_exploit(self, params: Dict, result: Dict) -> List[Dict]:
+        if not result.get("success"):
+            return []
+        module = result.get("module", "unknown")
+        return [{
+            "name": f"Successful exploitation: {module}",
+            "severity": "Critical",
+            "description": f"Metasploit exploit module '{module}' successfully opened a session on the target.",
+            "evidence": f"Module: {module}. Sessions: {result.get('sessions_after', {})}",
+            "remediation": "Immediately patch the exploited vulnerability. Investigate for signs of compromise.",
+        }]
+
+    # ------------------------------------------------------------------ #
+    # Metasploit Auxiliary
+    # ------------------------------------------------------------------ #
+    def _from_msf_auxiliary(self, params: Dict, result: Dict) -> List[Dict]:
+        module = result.get("module", params.get("module", "unknown"))
+        raw = str(result.get("raw", ""))
+        if "[+]" not in raw and not result.get("success"):
+            return []
+        return [{
+            "name": f"Auxiliary scanner result: {module}",
+            "severity": "Medium",
+            "description": f"MSF auxiliary module '{module}' produced positive results.",
+            "evidence": f"Module: {module}. Source: {result.get('source', 'unknown')}.",
+            "remediation": "Review auxiliary output for exposed services and misconfigurations.",
+        }]
+
+    # ------------------------------------------------------------------ #
+    # Nikto
+    # ------------------------------------------------------------------ #
+    def _from_nikto(self, params: Dict, result: Dict) -> List[Dict]:
+        vulns = result.get("vulnerabilities", [])
+        if not vulns:
+            return []
+        findings = []
+        findings.append({
+            "name": "Web server vulnerabilities detected (Nikto)",
+            "severity": "Medium",
+            "description": f"Nikto detected {len(vulns)} potential web server issues.",
+            "evidence": f"Total findings: {len(vulns)}. Sample: {vulns[0].get('description', '')[:200]}",
+            "remediation": "Review Nikto findings individually, patch outdated server software, and remove default pages.",
+        })
+        # Flag specific high-severity entries
+        for vuln in vulns:
+            desc = str(vuln.get("description", "")).lower()
+            if any(kw in desc for kw in ["remote code", "rce", "file inclusion", "backdoor", "shell"]):
+                findings.append({
+                    "name": f"Critical Nikto finding: {vuln.get('description', '')[:80]}",
+                    "severity": "High",
+                    "description": vuln.get("description", ""),
+                    "evidence": f"OSVDB: {vuln.get('osvdb', 'N/A')}. URI: {vuln.get('uri', '')}",
+                    "remediation": "Immediately investigate and remediate this finding.",
+                })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # Gobuster
+    # ------------------------------------------------------------------ #
+    def _from_gobuster(self, params: Dict, result: Dict) -> List[Dict]:
+        results = result.get("results", [])
+        if not results:
+            return []
+        mode = result.get("mode", "dir")
+        findings = []
+        if mode == "dir":
+            sensitive = [r for r in results if any(kw in r.get("path", "").lower()
+                         for kw in ["/admin", "/backup", "/.git", "/.env", "/config", "/phpmyadmin",
+                                    "/wp-admin", "/debug", "/test", "/swagger", "/api-docs"])]
+            if sensitive:
+                findings.append({
+                    "name": "Sensitive directories discovered",
+                    "severity": "High",
+                    "description": f"Gobuster found {len(sensitive)} sensitive directory paths.",
+                    "evidence": f"Paths: {', '.join(r.get('path', '') for r in sensitive[:10])}",
+                    "remediation": "Restrict access to sensitive paths via authentication and ACLs.",
+                })
+            if len(results) > len(sensitive):
+                findings.append({
+                    "name": f"Directory enumeration: {len(results)} paths found",
+                    "severity": "Low",
+                    "description": "Gobuster directory brute-force discovered accessible paths.",
+                    "evidence": f"Total: {len(results)} paths discovered.",
+                    "remediation": "Review exposed directories and restrict unnecessary access.",
+                })
+        elif mode == "dns":
+            findings.append({
+                "name": f"Subdomain enumeration: {len(results)} subdomains found",
+                "severity": "Low",
+                "description": "Gobuster DNS brute-force discovered subdomains.",
+                "evidence": f"Subdomains: {', '.join(r.get('subdomain', '') for r in results[:10])}",
+                "remediation": "Audit exposed subdomains and restrict unused DNS entries.",
+            })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # Hydra
+    # ------------------------------------------------------------------ #
+    def _from_hydra(self, params: Dict, result: Dict) -> List[Dict]:
+        creds = result.get("credentials", [])
+        if not creds:
+            return []
+        return [{
+            "name": f"Cracked credentials: {result.get('service', 'unknown')}",
+            "severity": "Critical",
+            "description": f"Hydra brute-force found {len(creds)} valid credential pair(s) for {result.get('service', '')}.",
+            "evidence": f"Hosts: {', '.join(c.get('host', '') for c in creds[:5])}. Users: {', '.join(c.get('username', '') for c in creds[:5])}.",
+            "remediation": "Enforce strong passwords, account lockout policies, and MFA.",
+        }]
+
+    # ------------------------------------------------------------------ #
+    # Enum4linux
+    # ------------------------------------------------------------------ #
+    def _from_enum4linux(self, params: Dict, result: Dict) -> List[Dict]:
+        data = result.get("data", {})
+        findings = []
+        shares = data.get("shares", {})
+        if isinstance(shares, dict) and shares:
+            findings.append({
+                "name": "SMB shares enumerated",
+                "severity": "Medium",
+                "description": f"Enum4linux discovered {len(shares)} accessible SMB shares.",
+                "evidence": f"Shares: {list(shares.keys()) if isinstance(shares, dict) else shares}",
+                "remediation": "Restrict SMB share access, disable null sessions, and enforce authentication.",
+            })
+        elif isinstance(shares, list) and shares:
+            findings.append({
+                "name": "SMB shares enumerated",
+                "severity": "Medium",
+                "description": f"Enum4linux discovered {len(shares)} accessible SMB shares.",
+                "evidence": f"Shares: {[s.get('name', '') for s in shares[:10]]}",
+                "remediation": "Restrict SMB share access, disable null sessions, and enforce authentication.",
+            })
+        users = data.get("users", {})
+        if users:
+            user_count = len(users) if isinstance(users, (dict, list)) else 0
+            if user_count > 0:
+                findings.append({
+                    "name": "User accounts enumerated via SMB",
+                    "severity": "Medium",
+                    "description": f"Enum4linux discovered {user_count} user accounts via null session.",
+                    "evidence": f"User count: {user_count}",
+                    "remediation": "Disable null SMB sessions and restrict user enumeration.",
+                })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # Nuclei
+    # ------------------------------------------------------------------ #
+    def _from_nuclei(self, params: Dict, result: Dict) -> List[Dict]:
+        nuclei_findings = result.get("findings", [])
+        if not nuclei_findings:
+            return []
+        findings = []
+        severity_map = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low", "info": "Low"}
+        for nf in nuclei_findings:
+            sev = severity_map.get(str(nf.get("severity", "")).lower(), "Medium")
+            cve_ids = nf.get("cve_id", [])
+            cve_str = f" (CVE: {', '.join(cve_ids)})" if cve_ids else ""
+            findings.append({
+                "name": f"Nuclei: {nf.get('name', nf.get('template_id', 'unknown'))}{cve_str}",
+                "severity": sev,
+                "description": nf.get("description", nf.get("name", "")),
+                "evidence": f"Matched at: {nf.get('matched_at', '')}. Template: {nf.get('template_id', '')}. CVSS: {nf.get('cvss_score', 'N/A')}.",
+                "remediation": "Apply vendor patches or mitigations for the identified vulnerability.",
+            })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # FFUF
+    # ------------------------------------------------------------------ #
+    def _from_ffuf(self, params: Dict, result: Dict) -> List[Dict]:
+        results = result.get("results", [])
+        if not results:
+            return []
+        findings = []
+        sensitive = [r for r in results if any(kw in str(r.get("input", "")).lower()
+                     for kw in ["admin", "backup", ".git", ".env", "config", "debug", "secret", "token"])]
+        if sensitive:
+            findings.append({
+                "name": "Sensitive endpoints discovered (FFUF)",
+                "severity": "High",
+                "description": f"FFUF fuzzing discovered {len(sensitive)} potentially sensitive endpoints.",
+                "evidence": f"Endpoints: {', '.join(r.get('input', '') for r in sensitive[:10])}",
+                "remediation": "Restrict access to sensitive endpoints via authentication and ACLs.",
+            })
+        findings.append({
+            "name": f"Web fuzzing: {len(results)} responses found",
+            "severity": "Low",
+            "description": f"FFUF web fuzzing discovered {len(results)} responding endpoints.",
+            "evidence": f"Total: {len(results)} endpoints. Status codes: {set(r.get('status', 0) for r in results)}",
+            "remediation": "Review exposed endpoints and restrict unnecessary access.",
+        })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # SSLScan
+    # ------------------------------------------------------------------ #
+    def _from_sslscan(self, params: Dict, result: Dict) -> List[Dict]:
+        data = result.get("data", {})
+        vulns = data.get("vulnerabilities", [])
+        findings = []
+        for vuln in vulns:
+            severity = "High" if "deprecated" in vuln.lower() or "expired" in vuln.lower() else "Medium"
+            findings.append({
+                "name": f"TLS/SSL issue: {vuln}",
+                "severity": severity,
+                "description": vuln,
+                "evidence": f"Target: {result.get('target', '')}. sslscan detected the issue.",
+                "remediation": "Update TLS configuration to disable weak protocols and ciphers.",
+            })
+        # Check certificate
+        cert = data.get("certificate", {})
+        if cert.get("expired"):
+            findings.append({
+                "name": "Expired SSL/TLS certificate",
+                "severity": "High",
+                "description": "The server's SSL/TLS certificate has expired.",
+                "evidence": f"Not after: {cert.get('not_after', 'unknown')}",
+                "remediation": "Renew the SSL/TLS certificate immediately.",
+            })
+        if cert.get("self_signed"):
+            findings.append({
+                "name": "Self-signed SSL/TLS certificate",
+                "severity": "Medium",
+                "description": "The server uses a self-signed certificate.",
+                "evidence": f"Issuer: {cert.get('issuer', 'unknown')}",
+                "remediation": "Replace with a certificate issued by a trusted CA.",
+            })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # DNS Enum
+    # ------------------------------------------------------------------ #
+    def _from_dns_enum(self, params: Dict, result: Dict) -> List[Dict]:
+        records = result.get("records", [])
+        if not records:
+            return []
+        # Check for zone transfer
+        scan_type = result.get("type", "")
+        if scan_type == "axfr" and records:
+            return [{
+                "name": "DNS zone transfer possible",
+                "severity": "High",
+                "description": "DNS zone transfer (AXFR) succeeded, exposing all DNS records.",
+                "evidence": f"Records retrieved: {len(records)}",
+                "remediation": "Restrict zone transfers to authorized secondary DNS servers only.",
+            }]
+        return [{
+            "name": f"DNS enumeration: {len(records)} records found",
+            "severity": "Low",
+            "description": f"DNS reconnaissance discovered {len(records)} records for the target domain.",
+            "evidence": f"Record types: {set(r.get('type', '') for r in records)}",
+            "remediation": "Review DNS records for information disclosure and unnecessary entries.",
+        }]
+
+    # ------------------------------------------------------------------ #
+    # Deduplication
+    # ------------------------------------------------------------------ #
     def _dedupe(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         seen = set()
         unique = []
@@ -67,99 +450,25 @@ class AnalysisEngine:
             unique.append(finding)
         return unique
 
-    def _from_http_probe(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
-        findings = []
-        status = int(result.get("status_code", 0))
-        hsts = result.get("hsts")
-        server = result.get("server")
-        powered = result.get("x_powered_by")
-        final_url = str(result.get("final_url", ""))
-        original_url = str(result.get("url", ""))
 
-        if original_url.startswith("http://") and final_url.startswith("http://"):
-            findings.append(
-                {
-                    "name": "HTTP without HTTPS redirect",
-                    "severity": "Medium",
-                    "description": "Web endpoint appears to serve traffic over HTTP without redirect to HTTPS.",
-                    "evidence": f"Requested {original_url}, final URL {final_url}, status {status}.",
-                    "remediation": "Enforce HTTPS and add permanent HTTP->HTTPS redirects.",
-                }
-            )
-        if final_url.startswith("https://") and not hsts:
-            findings.append(
-                {
-                    "name": "Missing HSTS header",
-                    "severity": "Low",
-                    "description": "HTTPS endpoint does not advertise Strict-Transport-Security.",
-                    "evidence": f"No HSTS header on {final_url}.",
-                    "remediation": "Add Strict-Transport-Security with appropriate max-age and includeSubDomains.",
-                }
-            )
-        if server:
-            findings.append(
-                {
-                    "name": "Server banner disclosure",
-                    "severity": "Low",
-                    "description": "Server technology banner is exposed in HTTP response headers.",
-                    "evidence": f"Server header: {server}",
-                    "remediation": "Reduce information disclosure in server headers where feasible.",
-                }
-            )
-        if powered:
-            findings.append(
-                {
-                    "name": "X-Powered-By header disclosure",
-                    "severity": "Low",
-                    "description": "Application framework information is exposed in response headers.",
-                    "evidence": f"X-Powered-By: {powered}",
-                    "remediation": "Remove or obfuscate framework-identifying response headers.",
-                }
-            )
-        return findings
-
-    def _from_wpscan(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
-        findings = []
-        data = result.get("result", {})
-        version = data.get("version", {})
-        if version.get("status") == "insecure":
-            findings.append(
-                {
-                    "name": "Insecure WordPress version",
-                    "severity": "High",
-                    "description": "WPScan reports an insecure WordPress core version.",
-                    "evidence": f"Detected version: {version.get('number', 'unknown')}",
-                    "remediation": "Upgrade WordPress core to the latest secure version.",
-                }
-            )
-        for plugin_name, plugin in (data.get("plugins") or {}).items():
-            vulns = plugin.get("vulnerabilities") or []
-            if not vulns:
-                continue
-            findings.append(
-                {
-                    "name": f"Vulnerable WordPress plugin: {plugin_name}",
-                    "severity": "High",
-                    "description": "WPScan reported known vulnerabilities in a detected plugin.",
-                    "evidence": f"Plugin {plugin_name} vulnerability count: {len(vulns)}.",
-                    "remediation": "Update or remove vulnerable plugin versions and harden plugin management.",
-                }
-            )
-        return findings
-
-    def _from_searchsploit(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
-        data = result.get("matches", {})
-        exploits = (data.get("RESULTS_EXPLOIT") or [])
-        shellcodes = (data.get("RESULTS_SHELLCODE") or [])
-        total = len(exploits) + len(shellcodes)
-        if total == 0:
-            return []
-        return [
-            {
-                "name": "Public exploit references found",
-                "severity": "Medium",
-                "description": "Exploit-DB correlation found public exploit references related to discovered services/software.",
-                "evidence": f"searchsploit returned {total} references.",
-                "remediation": "Prioritize patching and compensating controls for software with public exploit references.",
-            }
-        ]
+# ------------------------------------------------------------------ #
+# Register all handlers
+# ------------------------------------------------------------------ #
+AnalysisEngine._handlers = {
+    "nmap": AnalysisEngine._from_nmap,
+    "sqlmap": AnalysisEngine._from_sqlmap,
+    "http_probe": AnalysisEngine._from_http_probe,
+    "wpscan": AnalysisEngine._from_wpscan,
+    "searchsploit": AnalysisEngine._from_searchsploit,
+    "metasploit_search": AnalysisEngine._from_metasploit_search,
+    "msf_exploit": AnalysisEngine._from_msf_exploit,
+    "msf_auxiliary": AnalysisEngine._from_msf_auxiliary,
+    "nikto": AnalysisEngine._from_nikto,
+    "gobuster": AnalysisEngine._from_gobuster,
+    "hydra": AnalysisEngine._from_hydra,
+    "enum4linux": AnalysisEngine._from_enum4linux,
+    "nuclei": AnalysisEngine._from_nuclei,
+    "ffuf": AnalysisEngine._from_ffuf,
+    "sslscan": AnalysisEngine._from_sslscan,
+    "dns_enum": AnalysisEngine._from_dns_enum,
+}

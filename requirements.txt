@@ -4,4 +4,5 @@ weasyprint  # optional for PDF
 fastapi
 uvicorn[standard]
 pytest
+pymetasploit3  # Metasploit RPC client
 # For XML parsing: lxml (if needed)

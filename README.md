@@ -20,7 +20,8 @@ Autonomous, policy-controlled pentesting orchestration service with async runs, 
 - `orchestrator.py`: decision loop, policy enforcement, tool execution
 - `policy_engine.py` + `policy.json`: safety and execution controls
 - `analysis_engine.py`: deterministic pentest findings
-- `tool_wrappers/plugins/*`: pluggable wrappers (`nmap`, `http_probe`, `searchsploit`, `wpscan`, `sqlmap`)
+- `tool_wrappers/plugins/*`: pluggable wrappers (`nmap`, `http_probe`, `searchsploit`, `metasploit_search`, `wpscan`, `sqlmap`)
+- `wordlist_registry.py`: user-provided wordlist metadata store
 - `reporting.py`: report generation
 
 ## Quick Start (Local)
@@ -61,6 +62,28 @@ curl -X POST http://localhost:8000/runs/<run_id>/cancel
 
 ```bash
 curl http://localhost:8000/runs/<run_id>/report -o report.html
+```
+
+## Wordlist Registry (User-Provided Files)
+
+Register local wordlist path:
+
+```bash
+curl -X POST http://localhost:8000/wordlists \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"common\",\"path\":\"/absolute/path/to/wordlist.txt\",\"description\":\"custom list\"}"
+```
+
+List registered wordlists:
+
+```bash
+curl http://localhost:8000/wordlists
+```
+
+Delete registry entry:
+
+```bash
+curl -X DELETE http://localhost:8000/wordlists/common
 ```
 
 ## CLI Mode
@@ -126,8 +149,9 @@ Plugins are auto-discovered at runtime.
   1. `nmap`
   2. `http_probe`
   3. `searchsploit`
-  4. `wpscan`
-  5. `sqlmap`
+  4. `metasploit_search` (search-only)
+  5. `wpscan`
+  6. `sqlmap`
 - Deterministic findings added for:
   - exposed services/ports
   - SQLi indicators
@@ -139,7 +163,7 @@ Plugins are auto-discovered at runtime.
 ## Safety Boundary
 
 This repository currently supports **passive/assessment-oriented** workflows.  
-Exploit execution automation (for example via Metasploit modules) and brute-force wordlist attack setup are intentionally not included by default.
+Exploit execution automation and brute-force wordlist attack setup are intentionally not included by default.
 
 ## Docker
 

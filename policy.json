@@ -4,17 +4,44 @@
     "high",
     "critical"
   ],
-  "max_tool_timeout_seconds": 300,
+  "max_tool_timeout_seconds": 600,
   "tool_timeouts": {
     "nmap": 180,
-    "sqlmap": 300
+    "sqlmap": 300,
+    "nikto": 300,
+    "gobuster": 300,
+    "hydra": 300,
+    "nuclei": 300,
+    "ffuf": 300,
+    "msf_exploit": 600,
+    "msf_auxiliary": 300,
+    "msf_payload": 120,
+    "msf_session": 120,
+    "enum4linux": 300,
+    "sslscan": 120,
+    "dns_enum": 180
   },
   "allowed_tools": [
     "nmap",
     "http_probe",
     "searchsploit",
+    "metasploit_search",
+    "msf_auxiliary",
     "wpscan",
-    "sqlmap"
+    "sqlmap",
+    "nikto",
+    "gobuster",
+    "nuclei",
+    "ffuf",
+    "sslscan",
+    "dns_enum",
+    "enum4linux"
+  ],
+  "blocked_tools_require_unlock": [
+    "msf_exploit",
+    "msf_payload",
+    "msf_session",
+    "hydra"
   ],
   "blocked_flags": {
     "nmap": [
@@ -34,8 +61,11 @@
       "--file-write",
       "--file-read"
     ],
-    "metasploit": [
-      "*"
+    "gobuster": [
+      "--wildcard"
+    ],
+    "hydra": [
+      "-e nsr"
     ]
   }
 }
