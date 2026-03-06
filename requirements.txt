@@ -1,0 +1,7 @@
+requests
+jinja2
+weasyprint  # optional for PDF
+fastapi
+uvicorn[standard]
+pytest
+# For XML parsing: lxml (if needed)

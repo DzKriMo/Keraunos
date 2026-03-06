@@ -1,0 +1,41 @@
+{
+  "default_action": "deny",
+  "require_confirmation_for_risk": [
+    "high",
+    "critical"
+  ],
+  "max_tool_timeout_seconds": 300,
+  "tool_timeouts": {
+    "nmap": 180,
+    "sqlmap": 300
+  },
+  "allowed_tools": [
+    "nmap",
+    "http_probe",
+    "searchsploit",
+    "wpscan",
+    "sqlmap"
+  ],
+  "blocked_flags": {
+    "nmap": [
+      "--script vuln",
+      "--script exploit",
+      "-sU"
+    ],
+    "wpscan": [
+      "--passwords",
+      "--usernames",
+      "--password-attack",
+      "--stealthy"
+    ],
+    "sqlmap": [
+      "--os-shell",
+      "--sql-shell",
+      "--file-write",
+      "--file-read"
+    ],
+    "metasploit": [
+      "*"
+    ]
+  }
+}
