@@ -3,6 +3,7 @@ jinja2
 weasyprint  # optional for PDF
 fastapi
 uvicorn[standard]
+httpx
 pytest
 pymetasploit3  # Metasploit RPC client
 # For XML parsing: lxml (if needed)
