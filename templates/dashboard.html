@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Keraunos — Live Pentesting Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #1a2234;
+            --bg-card-hover: #1f2b42;
+            --border: #2a3550;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-purple: #8b5cf6;
+            --glow-blue: rgba(59, 130, 246, 0.15);
+            --glow-green: rgba(16, 185, 129, 0.15);
+            --glow-red: rgba(239, 68, 68, 0.15);
+            --font-sans: 'Inter', system-ui, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Header ─────────────────────────────────────────────── */
+        .header {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, #0d1525 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(12px);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .logo span {
+            font-size: 12px;
+            opacity: 0.6;
+            -webkit-text-fill-color: var(--text-muted);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-pill.idle {
+            background: var(--bg-card);
+            color: var(--text-muted);
+        }
+
+        .status-pill.running {
+            background: var(--glow-blue);
+            color: var(--accent-blue);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .status-pill.complete {
+            background: var(--glow-green);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-pill.failed {
+            background: var(--glow-red);
+            color: var(--accent-red);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .status-pill.running .status-dot {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.4;
+                transform: scale(0.8);
+            }
+        }
+
+        /* ── Controls ───────────────────────────────────────────── */
+        .controls {
+            padding: 20px 32px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .input-group label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .input-group input,
+        .input-group select {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus,
+        .input-group select:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-family: var(--font-sans);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-danger {
+            background: var(--bg-card);
+            color: var(--accent-red);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+            background: var(--glow-red);
+        }
+
+        /* ── Stats Bar ──────────────────────────────────────────── */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            padding: 0 32px 20px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            transition: border-color 0.3s;
+        }
+
+        .stat-card:hover {
+            border-color: var(--accent-blue);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 4px;
+            font-family: var(--font-mono);
+        }
+
+        .stat-value.critical {
+            color: var(--accent-red);
+        }
+
+        .stat-value.high {
+            color: var(--accent-amber);
+        }
+
+        .stat-value.medium {
+            color: var(--accent-blue);
+        }
+
+        .stat-value.low {
+            color: var(--accent-green);
+        }
+
+        /* ── Main Grid ──────────────────────────────────────────── */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 0 32px 32px;
+        }
+
+        @media (max-width: 1100px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-title .icon {
+            font-size: 16px;
+        }
+
+        .panel-badge {
+            background: var(--bg-primary);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        .panel-body {
+            padding: 0;
+            overflow-y: auto;
+            max-height: 400px;
+            flex: 1;
+        }
+
+        /* ── Event Feed ─────────────────────────────────────────── */
+        .event-feed {
+            list-style: none;
+        }
+
+        .event-item {
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(42, 53, 80, 0.5);
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            transition: background 0.15s;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .event-item:hover {
+            background: var(--bg-card-hover);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .event-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .event-icon.tool {
+            background: var(--glow-blue);
+        }
+
+        .event-icon.finding {
+            background: var(--glow-green);
+        }
+
+        .event-icon.error {
+            background: var(--glow-red);
+        }
+
+        .event-icon.info {
+            background: rgba(139, 92, 246, 0.15);
+        }
+
+        .event-icon.confirm {
+            background: rgba(245, 158, 11, 0.15);
+        }
+
+        .event-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .event-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .event-detail {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+            font-family: var(--font-mono);
+            word-break: break-all;
+        }
+
+        .event-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            flex-shrink: 0;
+        }
+
+        /* ── Findings Table ─────────────────────────────────────── */
+        .findings-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .findings-table th {
+            text-align: left;
+            padding: 10px 16px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+        }
+
+        .findings-table td {
+            padding: 10px 16px;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(42, 53, 80, 0.3);
+            vertical-align: top;
+        }
+
+        .findings-table tr {
+            transition: background 0.15s;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .findings-table tbody tr:hover {
+            background: var(--bg-card-hover);
+        }
+
+        .sev-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .sev-badge.Critical {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+        }
+
+        .sev-badge.High {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-amber);
+        }
+
+        .sev-badge.Medium {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+        }
+
+        .sev-badge.Low {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-green);
+        }
+
+        /* ── Confirmation Modal ─────────────────────────────────── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            max-width: 500px;
+            width: 90%;
+            animation: modalIn 0.2s ease-out;
+        }
+
+        @keyframes modalIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .modal h3 {
+            font-size: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal pre {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-secondary);
+            overflow-x: auto;
+            max-height: 200px;
+            margin-bottom: 16px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        /* ── Phase Progress ─────────────────────────────────────── */
+        .phase-bar {
+            display: flex;
+            gap: 4px;
+            padding: 0 32px 16px;
+        }
+
+        .phase-step {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--bg-card);
+            transition: background 0.5s;
+        }
+
+        .phase-step.active {
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+        }
+
+        .phase-step.done {
+            background: var(--accent-green);
+        }
+
+        .phase-labels {
+            display: flex;
+            padding: 0 32px 12px;
+            gap: 4px;
+        }
+
+        .phase-label {
+            flex: 1;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .phase-label.active {
+            color: var(--accent-cyan);
+        }
+
+        .phase-label.done {
+            color: var(--accent-green);
+        }
+
+        /* ── Tool Output Panel (Full Width) ─────────────────────── */
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .tool-output {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.6;
+            padding: 16px 20px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .tool-output .cmd {
+            color: var(--accent-cyan);
+        }
+
+        .tool-output .success {
+            color: var(--accent-green);
+        }
+
+        .tool-output .error {
+            color: var(--accent-red);
+        }
+
+        .tool-output .warn {
+            color: var(--accent-amber);
+        }
+
+        /* ── Scrollbar ──────────────────────────────────────────── */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* ── Empty state ────────────────────────────────────────── */
+        .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .empty-state .icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <div class="logo">⚡ KERAUNOS <span>v2.0</span></div>
+            <div id="statusPill" class="status-pill idle">
+                <div class="status-dot"></div>
+                <span id="statusText">IDLE</span>
+            </div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+            <span id="runId" style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);"></span>
+            <span id="elapsedTime"
+                style="font-family:var(--font-mono); font-size:13px; color:var(--text-secondary);">00:00</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <div class="input-group">
+            <label>Target</label>
+            <input type="text" id="targetInput" placeholder="10.129.1.133" value="10.129.1.133" style="width:220px;">
+        </div>
+        <div class="input-group">
+            <label>Scope</label>
+            <input type="text" id="scopeInput" placeholder="10.129.1.133/32" value="10.129.1.133/32"
+                style="width:180px;">
+        </div>
+        <div class="input-group">
+            <label>Max Steps</label>
+            <input type="number" id="maxStepsInput" value="40" min="1" max="200" style="width:80px;">
+        </div>
+        <button class="btn btn-primary" id="startBtn" onclick="startRun()">
+            ▶ Launch
+        </button>
+        <button class="btn btn-danger" id="cancelBtn" onclick="cancelRun()" style="display:none;">
+            ✕ Cancel
+        </button>
+    </div>
+
+    <!-- Phase Progress -->
+    <div class="phase-labels">
+        <div class="phase-label" id="phase-recon">Recon</div>
+        <div class="phase-label" id="phase-enum">Enumeration</div>
+        <div class="phase-label" id="phase-discovery">Discovery</div>
+        <div class="phase-label" id="phase-vuln">Vuln Scan</div>
+        <div class="phase-label" id="phase-exploit">Exploitation</div>
+        <div class="phase-label" id="phase-report">Report</div>
+    </div>
+    <div class="phase-bar">
+        <div class="phase-step" id="pbar-recon"></div>
+        <div class="phase-step" id="pbar-enum"></div>
+        <div class="phase-step" id="pbar-discovery"></div>
+        <div class="phase-step" id="pbar-vuln"></div>
+        <div class="phase-step" id="pbar-exploit"></div>
+        <div class="phase-step" id="pbar-report"></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-bar">
+        <div class="stat-card">
+            <div class="stat-label">Tools Run</div>
+            <div class="stat-value" id="statTools">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Findings</div>
+            <div class="stat-value" id="statFindings">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Critical</div>
+            <div class="stat-value critical" id="statCritical">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">High</div>
+            <div class="stat-value high" id="statHigh">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Medium</div>
+            <div class="stat-value medium" id="statMedium">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Low</div>
+            <div class="stat-value low" id="statLow">0</div>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+        <!-- Live Event Feed -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><span class="icon">📡</span> Live Event Feed</div>
+                <div class="panel-badge" id="eventCount">0</div>
+            </div>
+            <div class="panel-body">
+                <ul class="event-feed" id="eventFeed">
+                    <li class="empty-state" id="eventEmpty">
+                        <div class="icon">📡</div>
+                        Launch a scan to see live events
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Findings -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title"><span class="icon">🔍</span> Findings</div>
+                <div class="panel-badge" id="findingsCount">0</div>
+            </div>
+            <div class="panel-body">
+                <table class="findings-table">
+                    <thead>
+                        <tr>
+                            <th>Severity</th>
+                            <th>Finding</th>
+                            <th>Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody id="findingsBody">
+                    </tbody>
+                </table>
+                <div class="empty-state" id="findingsEmpty">
+                    <div class="icon">🔍</div>
+                    Findings will appear here as tools complete
+                </div>
+            </div>
+        </div>
+
+        <!-- Tool Output (Full Width) -->
+        <div class="panel full-width">
+            <div class="panel-header">
+                <div class="panel-title"><span class="icon">🖥️</span> Latest Tool Output</div>
+                <div class="panel-badge" id="currentTool">—</div>
+            </div>
+            <div class="panel-body">
+                <div class="tool-output" id="toolOutput">Waiting for tool execution...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal-overlay" id="confirmModal">
+        <div class="modal">
+            <h3>⚠️ Action Requires Confirmation</h3>
+            <pre id="confirmDetail"></pre>
+            <div class="modal-actions">
+                <button class="btn btn-danger" onclick="respondConfirmation(false)">✕ Deny</button>
+                <button class="btn btn-primary" onclick="respondConfirmation(true)">✓ Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── State ──────────────────────────────────────────────────
+        let ws = null;
+        let currentRunId = null;
+        let startTime = null;
+        let timerInterval = null;
+        let eventCounter = 0;
+        let pendingConfirmId = null;
+
+        const API_BASE = window.location.origin;
+
+        const PHASE_TOOLS = {
+            recon: ['nmap', 'dns_enum', 'http_probe'],
+            enum: ['sslscan', 'nikto', 'enum4linux'],
+            discovery: ['gobuster', 'ffuf'],
+            vuln: ['nuclei', 'searchsploit', 'metasploit_search', 'wpscan', 'sqlmap'],
+            exploit: ['msf_exploit', 'msf_auxiliary', 'msf_payload', 'msf_session', 'hydra'],
+            report: [],
+        };
+
+        const toolsRun = new Set();
+        const findings = [];
+
+        // ── API Calls ──────────────────────────────────────────────
+        async function startRun() {
+            const target = document.getElementById('targetInput').value.trim();
+            const scope = document.getElementById('scopeInput').value.trim();
+            const maxSteps = parseInt(document.getElementById('maxStepsInput').value);
+            if (!target) return;
+
+            resetDashboard();
+
+            try {
+                const res = await fetch(`${API_BASE}/runs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target, scope, max_steps: maxSteps }),
+                });
+                const run = await res.json();
+                currentRunId = run.id;
+                // Update URL to include run_id without reloading
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('run_id', run.id);
+                window.history.pushState({}, '', newUrl);
+
+                initRun(run);
+                connectWebSocket(run.id);
+            } catch (e) {
+                addEvent('error', 'Connection Failed', `Could not reach API: ${e.message}`);
+            }
+        }
+
+        function initRun(run) {
+            currentRunId = run.id;
+            document.getElementById('runId').textContent = `RUN: ${run.id.slice(0, 8)}`;
+
+            const statusMap = {
+                'queued': ['idle', 'QUEUED'],
+                'running': ['running', 'RUNNING'],
+                'complete': ['complete', 'COMPLETE'],
+                'failed': ['failed', 'FAILED'],
+                'cancelled': ['failed', 'CANCELLED'],
+                'partial': ['complete', 'PARTIAL']
+            };
+
+            const [cls, text] = statusMap[run.status] || ['idle', run.status.toUpperCase()];
+            setStatus(cls, text);
+
+            if (run.status === 'running') {
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('cancelBtn').style.display = '';
+                startTimer(run.updated_at);
+            } else if (['complete', 'failed', 'cancelled', 'partial'].includes(run.status)) {
+                resetButtons();
+            }
+        }
+
+        async function cancelRun() {
+            if (!currentRunId) return;
+            try {
+                await fetch(`${API_BASE}/runs/${currentRunId}/cancel`, { method: 'POST' });
+                addEvent('info', 'Cancel Requested', 'Waiting for current tool to finish...');
+            } catch (e) { /* ignore */ }
+        }
+
+        async function respondConfirmation(approved) {
+            document.getElementById('confirmModal').classList.remove('active');
+            if (!currentRunId || !pendingConfirmId) return;
+            try {
+                await fetch(`${API_BASE}/runs/${currentRunId}/confirm`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm_id: pendingConfirmId, approved }),
+                });
+                addEvent(approved ? 'tool' : 'error', approved ? 'Approved' : 'Denied', `Action ${approved ? 'approved' : 'denied'} by user`);
+            } catch (e) { /* ignore */ }
+            pendingConfirmId = null;
+        }
+
+        // ── WebSocket ──────────────────────────────────────────────
+        function connectWebSocket(runId) {
+            if (ws) ws.close();
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/${runId}`);
+
+            ws.onmessage = (msg) => {
+                const data = JSON.parse(msg.data);
+                handleEvent(data);
+            };
+
+            ws.onclose = (e) => {
+                if (currentRunId && !['complete', 'failed', 'cancelled', 'partial'].includes(document.getElementById('statusText').innerText.toLowerCase())) {
+                    // Unexpected close while running - try to reconnect
+                    console.log('WS closed, attempting reconnect in 2s...');
+                    setTimeout(() => connectWebSocket(runId), 2000);
+                }
+            };
+
+            ws.onerror = () => {
+                console.error('WS error');
+            };
+        }
+
+        function startPolling() {
+            const pollId = setInterval(async () => {
+                if (!currentRunId) { clearInterval(pollId); return; }
+                try {
+                    const res = await fetch(`${API_BASE}/runs/${currentRunId}`);
+                    const run = await res.json();
+                    if (['complete', 'failed', 'cancelled', 'partial'].includes(run.status)) {
+                        clearInterval(pollId);
+                        handleRunComplete(run);
+                    }
+                } catch (e) { /* retry */ }
+            }, 3000);
+        }
+
+        async function pollFinalStatus() {
+            if (!currentRunId) return;
+            try {
+                const res = await fetch(`${API_BASE}/runs/${currentRunId}`);
+                const run = await res.json();
+                handleRunComplete(run);
+            } catch (e) { /* ignore */ }
+        }
+
+        // ── Event Handler ──────────────────────────────────────────
+        function handleEvent(data) {
+            const stage = data.stage;
+            const payload = data.payload || {};
+
+            switch (stage) {
+                case 'initial_state':
+                    // Populate everything at once
+                    if (payload.history) {
+                        let lastToolWithOutput = null;
+                        payload.history.forEach(evt => {
+                            // Synthesize events from history
+                            addEvent('tool', `Tool: ${evt.tool}`, JSON.stringify(evt.params || {}));
+                            if (evt.result) {
+                                toolsRun.add(evt.tool);
+                                const outOk = !evt.result.error;
+                                addEvent(outOk ? 'finding' : 'error', `✓ ${evt.tool} result`, JSON.stringify(evt.result).slice(0, 100));
+                                lastToolWithOutput = evt;
+                            }
+                        });
+
+                        // Show output of the last tool found
+                        if (lastToolWithOutput) {
+                            const t = lastToolWithOutput;
+                            document.getElementById('currentTool').textContent = t.tool;
+                            const out = document.getElementById('toolOutput');
+                            out.innerHTML = `<span class="cmd">$ ${escapeHtml(t.tool)}</span>\n\n${colorizeOutput(t.result.raw || JSON.stringify(t.result, null, 2))}`;
+                            out.scrollTop = out.scrollHeight;
+                        }
+                    }
+                    if (payload.findings) {
+                        findings.length = 0;
+                        findings.push(...payload.findings);
+                        renderFindings();
+                        updateStats();
+                    }
+                    updatePhases();
+                    setStatusFromValue(payload.status);
+                    break;
+
+                case 'started':
+                    addEvent('info', 'Pentest Started', `Target: ${payload.target} | Scope: ${payload.scope}`);
+                    break;
+
+                case 'tool_executing':
+                    const tool = payload.tool || '?';
+                    toolsRun.add(tool);
+                    document.getElementById('currentTool').textContent = tool;
+                    document.getElementById('toolOutput').innerHTML = `<span class="cmd">$ ${tool}</span> ${escapeHtml(JSON.stringify(payload.params || {}))}\\n\\nExecuting...`;
+                    addEvent('tool', `Running: ${tool}`, JSON.stringify(payload.params || {}));
+                    updatePhases();
+                    updateStats();
+                    break;
+
+                case 'tool_executed':
+                    const ok = payload.ok;
+                    const toolName = payload.tool || '?';
+                    if (ok) {
+                        addEvent('finding', `✓ ${toolName} complete`, payload.summary || 'Success');
+                    } else {
+                        addEvent('error', `✗ ${toolName} failed`, payload.error || 'Unknown error');
+                    }
+                    if (payload.output) {
+                        const out = document.getElementById('toolOutput');
+                        out.innerHTML = `<span class="cmd">$ ${escapeHtml(toolName)}</span>\\n\\n${colorizeOutput(payload.output)}`;
+                        out.scrollTop = out.scrollHeight;
+                    }
+                    break;
+
+                case 'findings_updated':
+                    if (payload.findings) {
+                        findings.length = 0;
+                        findings.push(...payload.findings);
+                        renderFindings();
+                        updateStats();
+                    }
+                    break;
+
+                case 'policy_denied':
+                    addEvent('error', `Policy Denied: ${payload.tool}`, payload.reason || '');
+                    break;
+
+                case 'confirmation_required':
+                    pendingConfirmId = payload.confirm_id;
+                    document.getElementById('confirmDetail').textContent = payload.description || JSON.stringify(payload);
+                    document.getElementById('confirmModal').classList.add('active');
+                    addEvent('confirm', 'Confirmation Required', payload.description || '');
+                    break;
+
+                case 'cancelled':
+                    setStatus('failed', 'CANCELLED');
+                    addEvent('error', 'Run Cancelled', payload.reason || 'User or policy cancelled');
+                    stopTimer();
+                    resetButtons();
+                    break;
+
+                case 'completed':
+                    setStatus('complete', 'COMPLETE');
+                    addEvent('finding', '✓ Assessment Complete', `${payload.steps || 0} steps executed`);
+                    updatePhase('report', 'done');
+                    stopTimer();
+                    resetButtons();
+                    break;
+
+                case 'report_generated':
+                    addEvent('finding', '📄 Report Generated', `Target: ${payload.target}`);
+                    break;
+
+                case 'max_steps_reached':
+                    setStatus('complete', 'PARTIAL');
+                    addEvent('info', 'Max Steps Reached', `Partial report generated after ${payload.max_steps} steps`);
+                    stopTimer();
+                    resetButtons();
+                    break;
+
+                case 'analysis_complete':
+                    addEvent('info', 'LLM Analysis', `${payload.findings || 0} new findings from analysis`);
+                    break;
+
+                default:
+                    addEvent('info', stage, JSON.stringify(payload));
+            }
+        }
+
+        function handleRunComplete(run) {
+            const status = run.status || 'complete';
+            if (status === 'cancelled') {
+                setStatus('failed', 'CANCELLED');
+            } else if (status === 'failed') {
+                setStatus('failed', 'FAILED');
+                addEvent('error', 'Run Failed', run.error_message || '');
+            } else {
+                setStatus('complete', status.toUpperCase());
+            }
+            stopTimer();
+            resetButtons();
+        }
+
+        // ── UI Helpers ─────────────────────────────────────────────
+        function addEvent(type, title, detail) {
+            const empty = document.getElementById('eventEmpty');
+            if (empty) empty.remove();
+
+            eventCounter++;
+            document.getElementById('eventCount').textContent = eventCounter;
+
+            const feed = document.getElementById('eventFeed');
+            const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            const li = document.createElement('li');
+            li.className = 'event-item';
+            li.innerHTML = `
+                <div class="event-icon ${type}">${typeIcon(type)}</div>
+                <div class="event-content">
+                    <div class="event-title">${escapeHtml(title)}</div>
+                    <div class="event-detail">${escapeHtml(detail || '').slice(0, 300)}</div>
+                </div>
+                <div class="event-time">${now}</div>
+            `;
+            feed.insertBefore(li, feed.firstChild);
+
+            // Keep max 100 events
+            while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+        }
+
+        function typeIcon(type) {
+            return { tool: '🔧', finding: '✅', error: '❌', info: 'ℹ️', confirm: '⚠️' }[type] || '•';
+        }
+
+        function renderFindings() {
+            const body = document.getElementById('findingsBody');
+            const empty = document.getElementById('findingsEmpty');
+            body.innerHTML = '';
+
+            if (findings.length === 0) {
+                if (empty) empty.style.display = '';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            document.getElementById('findingsCount').textContent = findings.length;
+
+            // Sort: Critical > High > Medium > Low
+            const sevOrder = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+            const sorted = [...findings].sort((a, b) => (sevOrder[a.severity] || 4) - (sevOrder[b.severity] || 4));
+
+            for (const f of sorted) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><span class="sev-badge ${f.severity || ''}">${f.severity || '?'}</span></td>
+                    <td>${escapeHtml(f.name || '')}</td>
+                    <td style="font-size:11px; color:var(--text-muted);">${escapeHtml((f.evidence || '').slice(0, 150))}</td>
+                `;
+                body.appendChild(tr);
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('statTools').textContent = toolsRun.size;
+            document.getElementById('statFindings').textContent = findings.length;
+            document.getElementById('statCritical').textContent = findings.filter(f => f.severity === 'Critical').length;
+            document.getElementById('statHigh').textContent = findings.filter(f => f.severity === 'High').length;
+            document.getElementById('statMedium').textContent = findings.filter(f => f.severity === 'Medium').length;
+            document.getElementById('statLow').textContent = findings.filter(f => f.severity === 'Low').length;
+        }
+
+        function updatePhases() {
+            for (const [phase, tools] of Object.entries(PHASE_TOOLS)) {
+                const anyRun = tools.some(t => toolsRun.has(t));
+                const allRun = tools.length > 0 && tools.every(t => toolsRun.has(t));
+                if (allRun) {
+                    updatePhase(phase, 'done');
+                } else if (anyRun) {
+                    updatePhase(phase, 'active');
+                }
+            }
+        }
+
+        function updatePhase(phase, state) {
+            const bar = document.getElementById(`pbar-${phase}`);
+            const label = document.getElementById(`phase-${phase}`);
+            if (bar) { bar.className = `phase-step ${state}`; }
+            if (label) { label.className = `phase-label ${state}`; }
+        }
+
+        function setStatus(cls, text) {
+            const pill = document.getElementById('statusPill');
+            pill.className = `status-pill ${cls}`;
+            document.getElementById('statusText').textContent = text;
+        }
+
+        function setStatusFromValue(status) {
+            const statusMap = {
+                'queued': ['idle', 'QUEUED'],
+                'running': ['running', 'RUNNING'],
+                'complete': ['complete', 'COMPLETE'],
+                'failed': ['failed', 'FAILED'],
+                'cancelled': ['failed', 'CANCELLED'],
+                'partial': ['complete', 'PARTIAL']
+            };
+            const [cls, text] = statusMap[status] || ['idle', status ? status.toUpperCase() : 'IDLE'];
+            setStatus(cls, text);
+        }
+
+        function startTimer(startTimeStr) {
+            startTime = startTimeStr ? new Date(startTimeStr).getTime() : Date.now();
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                const s = String(elapsed % 60).padStart(2, '0');
+                document.getElementById('elapsedTime').textContent = `${m}:${s}`;
+            }, 1000);
+        }
+
+        function stopTimer() { if (timerInterval) clearInterval(timerInterval); }
+
+        function resetButtons() {
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('cancelBtn').style.display = 'none';
+        }
+
+        // ── Initialization ──────────────────────────────────────────
+        window.addEventListener('DOMContentLoaded', async () => {
+            const params = new URLSearchParams(window.location.search);
+            const runId = params.get('run_id');
+            if (runId) {
+                try {
+                    const res = await fetch(`${API_BASE}/runs/${runId}`);
+                    if (res.ok) {
+                        const run = await res.json();
+                        initRun(run);
+                        connectWebSocket(runId);
+                    }
+                } catch (e) {
+                    console.error('Failed to load run from URL', e);
+                }
+            }
+        });
+
+        function resetDashboard() {
+            eventCounter = 0;
+            toolsRun.clear();
+            findings.length = 0;
+            document.getElementById('eventFeed').innerHTML = '';
+            document.getElementById('findingsBody').innerHTML = '';
+            document.getElementById('findingsEmpty').style.display = '';
+            document.getElementById('eventCount').textContent = '0';
+            document.getElementById('findingsCount').textContent = '0';
+            document.getElementById('toolOutput').textContent = 'Waiting for tool execution...';
+            document.getElementById('currentTool').textContent = '—';
+            ['statTools', 'statFindings', 'statCritical', 'statHigh', 'statMedium', 'statLow']
+                .forEach(id => document.getElementById(id).textContent = '0');
+            ['recon', 'enum', 'discovery', 'vuln', 'exploit', 'report'].forEach(p => {
+                updatePhase(p, '');
+            });
+            document.getElementById('elapsedTime').textContent = '00:00';
+            if (ws) { ws.close(); ws = null; }
+            stopTimer();
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function colorizeOutput(text) {
+            return escapeHtml(text)
+                .replace(/(\[\+\][^\n]*)/g, '<span class="success">$1</span>')
+                .replace(/(\[-\][^\n]*)/g, '<span class="error">$1</span>')
+                .replace(/(\[\*\][^\n]*)/g, '<span class="cmd">$1</span>')
+                .replace(/(\[!\][^\n]*)/g, '<span class="warn">$1</span>');
+        }
+    </script>
+</body>
+
+</html>

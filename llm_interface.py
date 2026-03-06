@@ -70,7 +70,7 @@ AVAILABLE TOOLS AND PARAMETERS:
 
 
 class LLMInterface:
-    def __init__(self, model: str = "llama3", base_url: str = "http://localhost:11434", timeout: int = 60):
+    def __init__(self, model: str = "deepseek-coder:6.7b", base_url: str = "http://localhost:11434", timeout: int = 60):
         self.model = model
         self.base_url = base_url
         self.timeout = timeout

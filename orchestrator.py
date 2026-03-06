@@ -24,6 +24,7 @@ class Orchestrator:
         policy_path: str = "policy.json",
         progress_callback=None,
         should_stop_callback=None,
+        confirm_callback=None,
     ):
         self.target = target
         self.scope = scope
@@ -31,6 +32,7 @@ class Orchestrator:
         self.require_user_confirmation = require_user_confirmation
         self.progress_callback = progress_callback
         self.should_stop_callback = should_stop_callback
+        self.confirm_callback = confirm_callback
         self.data_store = DataStore(data_dir)
         self.llm = LLMInterface()
         self.tool_factory = ToolWrapperFactory()
@@ -76,10 +78,13 @@ class Orchestrator:
                     self._emit_progress("policy_denied", {"tool": tool_name, "reason": reason})
                     continue
                 if self._requires_confirmation(tool_name, params, needs_confirmation):
-                    if not confirm_action(f"Run {tool_name} with params {params}"):
+                    approved = self._confirm(f"Run {tool_name} with params {params}")
+                    if not approved:
                         self._record_event(tool_name, params, {"error": "Action cancelled by user"})
                         self._emit_progress("cancelled", {"tool": tool_name})
                         continue
+                # Notify dashboard that tool is about to run
+                self._emit_progress("tool_executing", {"tool": tool_name, "params": {k: v for k, v in params.items() if k != "__stop_callback"}})
                 # Execute tool
                 try:
                     result = self.execute_tool(tool_name, params)
@@ -88,7 +93,15 @@ class Orchestrator:
                 self._record_event(tool_name, params, result)
                 self._refresh_findings()
                 self._save_state()
-                self._emit_progress("tool_executed", {"tool": tool_name, "ok": "error" not in result})
+                # Build a summary for the dashboard
+                summary = self._build_tool_summary(tool_name, result)
+                raw_output = result.get("raw", "")
+                self._emit_progress("tool_executed", {
+                    "tool": tool_name,
+                    "ok": "error" not in result,
+                    "summary": summary,
+                    "output": str(raw_output)[:2000] if raw_output else "",
+                })
             elif action["type"] == "analysis":
                 # LLM wants to analyze existing data
                 analysis = self.ask_llm("analyze", context)
@@ -136,6 +149,40 @@ class Orchestrator:
             flags = params.get("flags", "")
             return any(flag in flags for flag in ["-sS", "-A", "-O", "--script"])
         return False
+
+    def _confirm(self, description: str) -> bool:
+        """Request confirmation via dashboard callback or terminal."""
+        if self.confirm_callback:
+            return self.confirm_callback(description)
+        return confirm_action(description)
+
+    def _build_tool_summary(self, tool_name: str, result: dict) -> str:
+        """Build a short summary of tool results for the dashboard."""
+        if "error" in result:
+            return f"Error: {str(result['error'])[:200]}"
+        summaries = {
+            "nmap": lambda r: f"{len(r.get('ports', []))} open port(s) found",
+            "nikto": lambda r: f"{r.get('count', 0)} vulnerability(ies) found",
+            "gobuster": lambda r: f"{r.get('count', 0)} path(s) discovered",
+            "nuclei": lambda r: f"{r.get('count', 0)} finding(s)",
+            "ffuf": lambda r: f"{r.get('count', 0)} response(s)",
+            "sslscan": lambda r: f"{len(r.get('data', {}).get('vulnerabilities', []))} TLS issue(s)",
+            "dns_enum": lambda r: f"{r.get('count', 0)} DNS record(s)",
+            "metasploit_search": lambda r: f"{r.get('count', 0)} module(s) found",
+            "searchsploit": lambda r: f"{len(r.get('matches', {}).get('RESULTS_EXPLOIT', []))} exploit(s)",
+            "sqlmap": lambda r: "Vulnerable!" if r.get("vulnerable") else "Not vulnerable",
+            "hydra": lambda r: f"{len(r.get('credentials', []))} credential(s) cracked",
+            "msf_exploit": lambda r: "Session opened!" if r.get("success") else "No session",
+            "enum4linux": lambda r: "SMB data collected",
+            "http_probe": lambda r: f"Status {r.get('status_code', '?')}",
+        }
+        fn = summaries.get(tool_name)
+        if fn:
+            try:
+                return fn(result)
+            except Exception:
+                pass
+        return "Complete"
 
     def _build_context(self) -> Dict[str, Any]:
         return {
