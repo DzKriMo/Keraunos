@@ -25,6 +25,7 @@ class Orchestrator:
         progress_callback=None,
         should_stop_callback=None,
         confirm_callback=None,
+        llm_enabled: bool = True,
     ):
         self.target = target
         self.scope = scope
@@ -35,6 +36,7 @@ class Orchestrator:
         self.confirm_callback = confirm_callback
         self.data_store = DataStore(data_dir)
         self.llm = LLMInterface()
+        self.llm.enabled = llm_enabled
         self.tool_factory = ToolWrapperFactory()
         self.analysis_engine = AnalysisEngine()
         self.policy = PolicyEngine(policy_path)
@@ -121,6 +123,8 @@ class Orchestrator:
         return {"status": "complete", "steps": len(self.state["history"]), "findings": len(self.state["findings"])}
 
     def ask_llm(self, prompt_type: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.llm.enabled:
+            return self._fallback_action(prompt_type, context)
         try:
             prompt = self.llm.build_prompt(prompt_type, context)
             response = self.llm.query(prompt)

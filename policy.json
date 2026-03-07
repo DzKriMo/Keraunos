@@ -1,12 +1,10 @@
 {
-  "default_action": "deny",
-  "require_confirmation_for_risk": [
-    "high",
-    "critical"
-  ],
+  "default_action": "allow",
+  "require_confirmation_for_risk": [],
   "max_tool_timeout_seconds": 600,
   "tool_timeouts": {
     "nmap": 180,
+    "nessus": 600,
     "sqlmap": 300,
     "nikto": 300,
     "gobuster": 300,
@@ -23,6 +21,7 @@
   },
   "allowed_tools": [
     "nmap",
+    "nessus",
     "http_probe",
     "searchsploit",
     "metasploit_search",
@@ -35,37 +34,18 @@
     "ffuf",
     "sslscan",
     "dns_enum",
-    "enum4linux"
-  ],
-  "blocked_tools_require_unlock": [
+    "enum4linux",
     "msf_exploit",
     "msf_payload",
     "msf_session",
     "hydra"
   ],
+  "blocked_tools_require_unlock": [],
   "blocked_flags": {
-    "nmap": [
-      "--script vuln",
-      "--script exploit",
-      "-sU"
-    ],
-    "wpscan": [
-      "--passwords",
-      "--usernames",
-      "--password-attack",
-      "--stealthy"
-    ],
-    "sqlmap": [
-      "--os-shell",
-      "--sql-shell",
-      "--file-write",
-      "--file-read"
-    ],
-    "gobuster": [
-      "--wildcard"
-    ],
-    "hydra": [
-      "-e nsr"
-    ]
+    "nmap": [],
+    "wpscan": [],
+    "sqlmap": [],
+    "gobuster": [],
+    "hydra": []
   }
 }

@@ -34,7 +34,7 @@ class RunManager:
         self._confirmation_events = confirmation_events
         self._confirmation_results = confirmation_results
 
-    def create_run(self, target: str, scope: str = "", max_steps: int = 25, policy_path: str = "policy.json") -> Dict:
+    def create_run(self, target: str, scope: str = "", max_steps: int = 25, policy_path: str = "policy.json", llm_enabled: bool = True) -> Dict:
         run_id = uuid.uuid4().hex
         now = self._now()
         run_dir = self.runs_dir / run_id
@@ -45,10 +45,10 @@ class RunManager:
             conn.execute(
                 """
                 INSERT INTO runs (
-                    id, target, scope, status, created_at, updated_at, max_steps, run_dir, state_path, policy_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, target, scope, status, created_at, updated_at, max_steps, run_dir, state_path, policy_path, llm_enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, target, scope, "queued", now, now, max_steps, str(run_dir), str(state_path), policy_path),
+                (run_id, target, scope, "queued", now, now, max_steps, str(run_dir), str(state_path), policy_path, 1 if llm_enabled else 0),
             )
             conn.commit()
 
@@ -149,6 +149,7 @@ class RunManager:
                 progress_callback=progress_callback,
                 should_stop_callback=lambda: self._is_cancel_requested(run_id),
                 confirm_callback=dashboard_confirm,
+                llm_enabled=bool(run.get("llm_enabled", 1))
             )
             result = orchestrator.run()
             report_path = self._find_report_path(run["run_dir"])
@@ -247,7 +248,8 @@ class RunManager:
                     last_event TEXT DEFAULT '',
                     last_event_payload TEXT DEFAULT '',
                     cancel_requested INTEGER DEFAULT 0,
-                    cancelled_at TEXT DEFAULT ''
+                    cancelled_at TEXT DEFAULT '',
+                    llm_enabled INTEGER DEFAULT 1
                 )
                 """
             )
@@ -259,6 +261,8 @@ class RunManager:
                 conn.execute("ALTER TABLE runs ADD COLUMN cancel_requested INTEGER DEFAULT 0")
             if "cancelled_at" not in existing_cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN cancelled_at TEXT DEFAULT ''")
+            if "llm_enabled" not in existing_cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN llm_enabled INTEGER DEFAULT 1")
             conn.commit()
 
     def _connect(self):
@@ -285,6 +289,7 @@ class RunManager:
             "last_event_payload",
             "cancel_requested",
             "cancelled_at",
+            "llm_enabled",
         ]
         item = dict(zip(columns, row))
         payload = item.get("last_event_payload")

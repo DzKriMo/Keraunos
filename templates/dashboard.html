@@ -125,6 +125,93 @@
             background: currentColor;
         }
 
+        .status-dot-on {
+            width: 10px;
+            height: 10px;
+            background: #10b981;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #10b981;
+        }
+
+        .status-dot-off {
+            width: 10px;
+            height: 10px;
+            background: #ef4444;
+            border-radius: 50%;
+        }
+
+        /* Switch Toggle */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            margin-left: 10px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #334155;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: var(--accent-blue);
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
+        .report-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+
+        .report-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .report-link {
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .report-link:hover {
+            text-decoration: underline;
+        }
+
         .status-pill.running .status-dot {
             animation: pulse 1.5s ease-in-out infinite;
         }
@@ -143,7 +230,7 @@
             }
         }
 
-        /* ── Controls ───────────────────────────────────────────── */
+        /* ── Controls ─────────────────────────────────────────────── */
         .controls {
             padding: 20px 32px;
             display: flex;
@@ -664,6 +751,47 @@
             font-size: 32px;
             margin-bottom: 8px;
         }
+
+        /* New styles for dashboard layout */
+        .main-content {
+            padding: 20px 32px 32px;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            /* Fixed left column, flexible right */
+            gap: 20px;
+        }
+
+        @media (max-width: 1100px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                /* Stack columns on smaller screens */
+            }
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 14px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .card-body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
     </style>
 </head>
 
@@ -677,133 +805,161 @@
                 <span id="statusText">IDLE</span>
             </div>
         </div>
-        <div style="display:flex; gap:10px; align-items:center;">
-            <span id="runId" style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);"></span>
+    </div>
+    <div style="display:flex; gap:25px; align-items:center;">
+        <!-- AI Status -->
+        <div
+            style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.2); padding: 6px 15px; border-radius: 30px; border: 1px solid var(--border);">
+            <div id="aiIndicator" class="status-dot-off"></div>
+            <div style="display: flex; flex-direction: column;">
+                <span style="font-size: 9px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.5px;">NEURAL
+                    LINK</span>
+                <span id="aiModel"
+                    style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">OLLAMA</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="llmToggle" checked onchange="toggleLLM()">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div style="display:flex; flex-direction: column; align-items: flex-end;">
+            <span id="runId" style="font-family:var(--font-mono); font-size:10px; color:var(--text-muted);">NOT
+                CONNECTED</span>
             <span id="elapsedTime"
-                style="font-family:var(--font-mono); font-size:13px; color:var(--text-secondary);">00:00</span>
+                style="font-family:var(--font-mono); font-size:14px; color:var(--accent-cyan); font-weight: 700;">00:00</span>
         </div>
     </div>
-
-    <!-- Controls -->
-    <div class="controls">
-        <div class="input-group">
-            <label>Target</label>
-            <input type="text" id="targetInput" placeholder="10.129.1.133" value="10.129.1.133" style="width:220px;">
-        </div>
-        <div class="input-group">
-            <label>Scope</label>
-            <input type="text" id="scopeInput" placeholder="10.129.1.133/32" value="10.129.1.133/32"
-                style="width:180px;">
-        </div>
-        <div class="input-group">
-            <label>Max Steps</label>
-            <input type="number" id="maxStepsInput" value="40" min="1" max="200" style="width:80px;">
-        </div>
-        <button class="btn btn-primary" id="startBtn" onclick="startRun()">
-            ▶ Launch
-        </button>
-        <button class="btn btn-danger" id="cancelBtn" onclick="cancelRun()" style="display:none;">
-            ✕ Cancel
-        </button>
     </div>
 
-    <!-- Phase Progress -->
-    <div class="phase-labels">
-        <div class="phase-label" id="phase-recon">Recon</div>
-        <div class="phase-label" id="phase-enum">Enumeration</div>
-        <div class="phase-label" id="phase-discovery">Discovery</div>
-        <div class="phase-label" id="phase-vuln">Vuln Scan</div>
-        <div class="phase-label" id="phase-exploit">Exploitation</div>
-        <div class="phase-label" id="phase-report">Report</div>
-    </div>
-    <div class="phase-bar">
-        <div class="phase-step" id="pbar-recon"></div>
-        <div class="phase-step" id="pbar-enum"></div>
-        <div class="phase-step" id="pbar-discovery"></div>
-        <div class="phase-step" id="pbar-vuln"></div>
-        <div class="phase-step" id="pbar-exploit"></div>
-        <div class="phase-step" id="pbar-report"></div>
-    </div>
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="dashboard-grid">
+            <!-- Left: Controls & Reports -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <div class="card">
+                    <div class="card-header">MISSION CONFIGURATION</div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <label>Target Host</label>
+                            <input type="text" id="targetInput" placeholder="10.129.1.133" value="10.129.1.133">
+                        </div>
+                        <div class="input-group">
+                            <label>Scope / CIDR</label>
+                            <input type="text" id="scopeInput" placeholder="10.129.0.0/24">
+                        </div>
+                        <div class="input-group">
+                            <label>Complexity Limit (Steps)</label>
+                            <input type="number" id="maxStepsInput" value="40" min="1" max="200">
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                            <button class="btn btn-primary" id="startBtn" onclick="startRun()">LAUNCH MISSION</button>
+                            <button class="btn btn-danger" id="cancelBtn" onclick="cancelRun()"
+                                style="display:none;">ABORT RUN</button>
+                        </div>
+                    </div>
+                </div>
 
-    <!-- Stats -->
-    <div class="stats-bar">
-        <div class="stat-card">
-            <div class="stat-label">Tools Run</div>
-            <div class="stat-value" id="statTools">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Total Findings</div>
-            <div class="stat-value" id="statFindings">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Critical</div>
-            <div class="stat-value critical" id="statCritical">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">High</div>
-            <div class="stat-value high" id="statHigh">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Medium</div>
-            <div class="stat-value medium" id="statMedium">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Low</div>
-            <div class="stat-value low" id="statLow">0</div>
-        </div>
-    </div>
-
-    <!-- Main Grid -->
-    <div class="main-grid">
-        <!-- Live Event Feed -->
-        <div class="panel">
-            <div class="panel-header">
-                <div class="panel-title"><span class="icon">📡</span> Live Event Feed</div>
-                <div class="panel-badge" id="eventCount">0</div>
-            </div>
-            <div class="panel-body">
-                <ul class="event-feed" id="eventFeed">
-                    <li class="empty-state" id="eventEmpty">
-                        <div class="icon">📡</div>
-                        Launch a scan to see live events
-                    </li>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Findings -->
-        <div class="panel">
-            <div class="panel-header">
-                <div class="panel-title"><span class="icon">🔍</span> Findings</div>
-                <div class="panel-badge" id="findingsCount">0</div>
-            </div>
-            <div class="panel-body">
-                <table class="findings-table">
-                    <thead>
-                        <tr>
-                            <th>Severity</th>
-                            <th>Finding</th>
-                            <th>Evidence</th>
-                        </tr>
-                    </thead>
-                    <tbody id="findingsBody">
-                    </tbody>
-                </table>
-                <div class="empty-state" id="findingsEmpty">
-                    <div class="icon">🔍</div>
-                    Findings will appear here as tools complete
+                <div class="card">
+                    <div class="card-header">RESULTS REPOSITORY</div>
+                    <div class="card-body" id="reportList" style="max-height: 350px; overflow-y: auto; padding: 0;">
+                        <div class="empty-state">
+                            <div class="icon">📄</div>
+                            Scanning for reports...
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Tool Output (Full Width) -->
-        <div class="panel full-width">
-            <div class="panel-header">
-                <div class="panel-title"><span class="icon">🖥️</span> Latest Tool Output</div>
-                <div class="panel-badge" id="currentTool">—</div>
-            </div>
-            <div class="panel-body">
-                <div class="tool-output" id="toolOutput">Waiting for tool execution...</div>
+            <!-- Right: Live Feed & Findings -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <!-- Phase Progress (Inside grid for better layout) -->
+                <div class="card" style="padding: 15px;">
+                    <div class="phase-labels" style="padding: 0 5px 8px;">
+                        <div class="phase-label" id="phase-recon">Recon</div>
+                        <div class="phase-label" id="phase-enum">Enum</div>
+                        <div class="phase-label" id="phase-discovery">Fuzz</div>
+                        <div class="phase-label" id="phase-vuln">Vuln</div>
+                        <div class="phase-label" id="phase-exploit">Root</div>
+                        <div class="phase-label" id="phase-report">Report</div>
+                    </div>
+                    <div class="phase-bar" style="padding: 0 5px;">
+                        <div class="phase-step" id="pbar-recon"></div>
+                        <div class="phase-step" id="pbar-enum"></div>
+                        <div class="phase-step" id="pbar-discovery"></div>
+                        <div class="phase-step" id="pbar-vuln"></div>
+                        <div class="phase-step" id="pbar-exploit"></div>
+                        <div class="phase-step" id="pbar-report"></div>
+                    </div>
+                </div>
+
+                <!-- Stats (Inside grid) -->
+                <div class="stats-bar" style="padding: 0; grid-template-columns: repeat(3, 1fr);">
+                    <div class="stat-card">
+                        <div class="stat-label">Tactics Used</div>
+                        <div class="stat-value" id="statTools">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Findings</div>
+                        <div class="stat-value" id="statFindings">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Critical/High</div>
+                        <div class="stat-value critical" id="statCriticalHigh">0</div>
+                    </div>
+                </div>
+
+                <!-- Feed Panel -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><span class="icon">📡</span> MISSION ACTIVITY LOG</div>
+                        <div class="panel-badge" id="eventCount">0</div>
+                    </div>
+                    <div class="panel-body" style="height: 400px;">
+                        <ul class="event-feed" id="eventFeed">
+                            <li class="empty-state" id="eventEmpty">
+                                <div class="icon">📡</div>
+                                Waiting for mission telemetry...
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Findings -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><span class="icon">🔍</span> Findings</div>
+                        <div class="panel-badge" id="findingsCount">0</div>
+                    </div>
+                    <div class="panel-body">
+                        <table class="findings-table">
+                            <thead>
+                                <tr>
+                                    <th>Severity</th>
+                                    <th>Finding</th>
+                                    <th>Evidence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="findingsBody">
+                            </tbody>
+                        </table>
+                        <div class="empty-state" id="findingsEmpty">
+                            <div class="icon">🔍</div>
+                            Findings will appear here as tools complete
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tool Output (Full Width) -->
+                <div class="panel full-width">
+                    <div class="panel-header">
+                        <div class="panel-title"><span class="icon">🖥️</span> Latest Tool Output</div>
+                        <div class="panel-badge" id="currentTool">—</div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="tool-output" id="toolOutput">Waiting for tool execution...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1166,10 +1322,7 @@
         function updateStats() {
             document.getElementById('statTools').textContent = toolsRun.size;
             document.getElementById('statFindings').textContent = findings.length;
-            document.getElementById('statCritical').textContent = findings.filter(f => f.severity === 'Critical').length;
-            document.getElementById('statHigh').textContent = findings.filter(f => f.severity === 'High').length;
-            document.getElementById('statMedium').textContent = findings.filter(f => f.severity === 'Medium').length;
-            document.getElementById('statLow').textContent = findings.filter(f => f.severity === 'Low').length;
+            document.getElementById('statCriticalHigh').textContent = findings.filter(f => f.severity === 'Critical' || f.severity === 'High').length;
         }
 
         function updatePhases() {
@@ -1250,19 +1403,25 @@
             eventCounter = 0;
             toolsRun.clear();
             findings.length = 0;
-            document.getElementById('eventFeed').innerHTML = '';
+            document.getElementById('eventFeed').innerHTML = `
+                <li class="empty-state" id="eventEmpty">
+                    <div class="icon">📡</div>
+                    Waiting for mission telemetry...
+                </li>
+            `;
             document.getElementById('findingsBody').innerHTML = '';
             document.getElementById('findingsEmpty').style.display = '';
             document.getElementById('eventCount').textContent = '0';
             document.getElementById('findingsCount').textContent = '0';
             document.getElementById('toolOutput').textContent = 'Waiting for tool execution...';
             document.getElementById('currentTool').textContent = '—';
-            ['statTools', 'statFindings', 'statCritical', 'statHigh', 'statMedium', 'statLow']
+            ['statTools', 'statFindings', 'statCriticalHigh']
                 .forEach(id => document.getElementById(id).textContent = '0');
             ['recon', 'enum', 'discovery', 'vuln', 'exploit', 'report'].forEach(p => {
                 updatePhase(p, '');
             });
             document.getElementById('elapsedTime').textContent = '00:00';
+            document.getElementById('runId').textContent = 'NOT CONNECTED';
             if (ws) { ws.close(); ws = null; }
             stopTimer();
         }
@@ -1280,7 +1439,87 @@
                 .replace(/(\[\*\][^\n]*)/g, '<span class="cmd">$1</span>')
                 .replace(/(\[!\][^\n]*)/g, '<span class="warn">$1</span>');
         }
+
+        // LLM Control
+        async function fetchLLMStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/llm/status`);
+                const status = await res.json();
+                const indicator = document.getElementById('aiIndicator');
+                const toggle = document.getElementById('llmToggle');
+                const modelSpan = document.getElementById('aiModel');
+
+                toggle.checked = status.enabled;
+                if (status.enabled && status.connected) {
+                    indicator.className = 'status-dot-on';
+                    modelSpan.textContent = status.model;
+                } else if (status.enabled && !status.connected) {
+                    indicator.className = 'status-dot-off';
+                    modelSpan.textContent = 'OLLAMA OFFLINE';
+                } else {
+                    indicator.className = 'status-dot-off';
+                    modelSpan.textContent = 'NEURAL LINK DISABLED';
+                }
+            } catch (e) {
+                document.getElementById('aiIndicator').className = 'status-dot-off';
+                document.getElementById('aiModel').textContent = 'API ERROR';
+            }
+        }
+
+        async function toggleLLM() {
+            try {
+                const res = await fetch(`${API_BASE}/llm/toggle`, { method: 'POST' });
+                const status = await res.json();
+                fetchLLMStatus(); // Refresh UI
+            } catch (e) {
+                console.error('Failed to toggle LLM', e);
+            }
+        }
+
+        async function fetchReports() {
+            try {
+                const res = await fetch(`${API_BASE}/reports`);
+                const data = await res.json();
+                const list = document.getElementById('reportList');
+                list.innerHTML = '';
+
+                if (data.items.length === 0) {
+                    list.innerHTML = `
+                        <div class="empty-state">
+                            <div class="icon">📄</div>
+                            No reports generated yet
+                        </div>
+                    `;
+                    return;
+                }
+
+                data.items.forEach(rep => {
+                    const div = document.createElement('div');
+                    div.className = 'report-item';
+                    const date = new Date(rep.created_at).toLocaleDateString();
+                    div.innerHTML = `
+                        <div style="min-width: 0;">
+                            <div style="font-size: 0.8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rep.filename)}</div>
+                            <div style="font-size: 0.65rem; opacity: 0.5;">ID: ${rep.run_id.slice(0, 8)} • ${date}</div>
+                        </div>
+                        <a href="${rep.path}" target="_blank" class="report-link">OPEN ↗</a>
+                    `;
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error('Failed to fetch reports', e);
+            }
+        }
+
+        // Initial state and intervals
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchLLMStatus();
+            fetchReports();
+            setInterval(fetchLLMStatus, 10000); // Poll AI health every 10s
+            setInterval(fetchReports, 30000);   // Refresh report list every 30s
+        });
     </script>
 </body>
 
 </html>
+```

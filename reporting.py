@@ -29,13 +29,17 @@ class ReportGenerator:
             template_str = f.read()
         template = Template(template_str)
 
+        # Calculate stats for advanced template
+        high_count = len([f for f in findings if f.get("severity") in {"Critical", "High"}])
+
         # Render
         html_content = template.render(
             target=target,
             date=datetime.now().strftime("%Y-%m-%d"),
             executive_summary=exec_summary,
             findings=findings,
-            history=history
+            history=history,
+            high_count=high_count
         )
         safe_target = self._safe_name(target or "unknown_target")
         output_dir = Path(self.data_store.data_dir)

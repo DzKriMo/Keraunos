@@ -1,5 +1,6 @@
 import requests
 import json
+import os
 from typing import Dict, Any
 from requests import RequestException
 
@@ -70,10 +71,12 @@ AVAILABLE TOOLS AND PARAMETERS:
 
 
 class LLMInterface:
-    def __init__(self, model: str = "deepseek-coder:6.7b", base_url: str = "http://localhost:11434", timeout: int = 60):
+    def __init__(self, model: str = "deepseek-coder:6.7b", base_url: str = None, timeout: int = 60):
         self.model = model
-        self.base_url = base_url
+        # Use env var for URL, default to host.docker.internal if in docker, or localhost
+        self.base_url = base_url or os.getenv("KERAUNOS_LLM_URL", "http://localhost:11434")
         self.timeout = timeout
+        self.enabled = True
         self.system_prompt = (
             "You are a senior penetration tester. You have deep knowledge of cybersecurity, "
             "vulnerability assessment, and exploitation. You are assisting an autonomous agent. "
@@ -149,6 +152,17 @@ Context:
 
 Return plain text only.
 """
+
+    def check_connection(self) -> bool:
+        """Verify if Ollama is reachable and the model is loaded."""
+        if not self.enabled:
+            return False
+        try:
+            # Check tags/health endpoint
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            return response.status_code == 200
+        except Exception:
+            return False
 
     def query(self, prompt: str) -> str:
         payload = {

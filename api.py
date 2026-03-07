@@ -17,6 +17,9 @@ app = FastAPI(title="Keraunos API", version="2.0.0")
 run_manager = RunManager()
 wordlist_registry = WordlistRegistry()
 
+# Global LLM preference
+_llm_enabled = True
+
 # ── WebSocket connection manager ────────────────────────────────────
 class ConnectionManager:
     def __init__(self):
@@ -96,6 +99,42 @@ def dashboard():
 def health():
     return {"status": "ok"}
 
+# ── LLM Control ─────────────────────────────────────────────────────
+@app.get("/llm/status")
+def get_llm_status():
+    from llm_interface import LLMInterface
+    llm = LLMInterface()
+    llm.enabled = _llm_enabled
+    return {
+        "enabled": _llm_enabled,
+        "connected": llm.check_connection() if _llm_enabled else False,
+        "model": llm.model
+    }
+
+@app.post("/llm/toggle")
+def toggle_llm():
+    global _llm_enabled
+    _llm_enabled = not _llm_enabled
+    return {"enabled": _llm_enabled}
+
+# ── Reports ─────────────────────────────────────────────────────────
+@app.get("/reports")
+def list_reports(_: None = Depends(require_api_key)):
+    """List all reports across all runs."""
+    reports = []
+    runs_dir = Path("./data/runs")
+    if runs_dir.exists():
+        for run_path in runs_dir.iterdir():
+            if run_path.is_dir():
+                for report in run_path.glob("report_*.html"):
+                    reports.append({
+                        "run_id": run_path.name,
+                        "filename": report.name,
+                        "path": f"/runs/{run_path.name}/report",
+                        "created_at": datetime.fromtimestamp(report.stat().st_mtime, timezone.utc).isoformat()
+                    })
+    return {"items": sorted(reports, key=lambda x: x["created_at"], reverse=True)}
+
 # ── Runs ────────────────────────────────────────────────────────────
 @app.post("/runs")
 def create_run(request: CreateRunRequest, _: None = Depends(require_api_key)):
@@ -104,6 +143,7 @@ def create_run(request: CreateRunRequest, _: None = Depends(require_api_key)):
         scope=request.scope,
         max_steps=request.max_steps,
         policy_path=request.policy_path,
+        llm_enabled=_llm_enabled
     )
 
 @app.get("/runs")
