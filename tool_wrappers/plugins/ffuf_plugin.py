@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from tool_wrappers.base import ToolWrapper
 
@@ -8,6 +9,7 @@ class FfufWrapper(ToolWrapper):
 
     tool_name = "ffuf"
     risk_level = "medium"
+    DEFAULT_FALLBACK_WORDLIST = str(Path(__file__).resolve().parents[2] / "data" / "default_web_paths.txt")
 
     def run(self, params: dict) -> dict:
         url = params.get("url")
@@ -17,6 +19,7 @@ class FfufWrapper(ToolWrapper):
         timeout = int(params.get("timeout", 300))
         stop_callback = params.get("__stop_callback")
         wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
+        wordlist = self._resolve_wordlist(wordlist)
         method = params.get("method", "GET")
         mc = params.get("match_codes", "200,204,301,302,307,401,403")
         fc = params.get("filter_codes")
@@ -51,10 +54,20 @@ class FfufWrapper(ToolWrapper):
 
         return {
             "url": url,
+            "wordlist": wordlist,
             "results": results,
             "count": len(results),
             "raw": stdout,
         }
+
+    def _resolve_wordlist(self, requested: str) -> str:
+        candidate = Path(str(requested))
+        if candidate.exists():
+            return str(candidate)
+        fallback = Path(self.DEFAULT_FALLBACK_WORDLIST)
+        if fallback.exists():
+            return str(fallback)
+        return str(candidate)
 
     def _parse_json(self, raw: str) -> list:
         """Parse ffuf JSON output."""

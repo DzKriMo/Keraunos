@@ -107,10 +107,19 @@ class ReportGenerator:
         if isinstance(exec_summary, dict):
             result = exec_summary.get("result")
             if isinstance(result, str) and result.strip():
-                return result.strip()
+                return self._sanitize_summary_text(result)
         if isinstance(exec_summary, str) and exec_summary.strip():
-            return exec_summary.strip()
-        return str(exec_summary).strip()
+            return self._sanitize_summary_text(exec_summary)
+        return self._sanitize_summary_text(str(exec_summary).strip())
+
+    def _sanitize_summary_text(self, value: str) -> str:
+        text = re.sub(r"<think>.*?</think>", "", str(value or ""), flags=re.DOTALL).strip()
+        text = re.sub(r"^\s*(the user wants me to|based on the penetration testing[, ]*|hmm[, ]*|bahwa[, ]*).*?(?=[A-Z])", "", text, flags=re.IGNORECASE | re.DOTALL)
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        clean_sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+        if clean_sentences:
+            return " ".join(clean_sentences[:6]).strip()
+        return text
 
     def _curate_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         merged: Dict[str, Dict[str, Any]] = {}

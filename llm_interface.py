@@ -734,7 +734,8 @@ Output ONLY the summary text, no JSON.
         # Extract JSON if needed
         if prompt_type == "report_executive":
             # For executive summary, just return the text (no JSON expected)
-            return {"result": raw_response.strip(), "reasoning": reasoning}
+            cleaned = re.sub(r"<think>.*?</think>", "", raw_response, flags=re.DOTALL).strip()
+            return {"result": cleaned, "reasoning": reasoning}
 
         json_data = self._extract_json(raw_response)
         if json_data is None:

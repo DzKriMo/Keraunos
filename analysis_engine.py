@@ -149,9 +149,20 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"sqli_indicator:{path or final_url}",
             })
+        if path.startswith("/search") and any(marker in payload_text for marker in ["' or '1'='1", "\" or \"1\"=\"1", "union", "1=1"]):
+            if any(marker in body for marker in ["platform administrator", "security analyst", "temporary guest account", "<strong>admin</strong>", "<strong>analyst</strong>", "<strong>guest</strong>"]):
+                findings.append({
+                    "name": "Potential SQL injection indicator",
+                    "severity": "High",
+                    "description": "Crafted search input appears to alter backend query behavior and disclose additional records.",
+                    "evidence": f"{final_url} returned multiple account records after injection-style input.",
+                    "remediation": "Use parameterized queries and server-side allowlists for search behavior.",
+                    "affected_resource": final_url,
+                    "fingerprint": f"sqli_indicator:{path or final_url}",
+                })
         if "/account" in final_url and status == 200:
             id_value = params.get("payload", {}).get("id") or ""
-            if any(token in body for token in ["email", "username", "account"]) and id_value:
+            if any(token in body for token in ["email", "username", "account", "internal note", "authorization is not enforced"]) and id_value:
                 findings.append({
                     "name": "Potential IDOR on account endpoint",
                     "severity": "High",
@@ -205,7 +216,7 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"stored_xss:{path or final_url}",
             })
-        if "/api/token" in final_url and any(token in body for token in ['"alg":"none"', '"alg": "none"', "unsigned", "bearer"]):
+        if any(token_path in final_url for token_path in ["/api/token", "/token-lab", "/token"]) and any(token in body for token in ['"alg":"none"', '"alg": "none"', "unsigned", "bearer"]):
             findings.append({
                 "name": "Potential unsigned bearer token",
                 "severity": "High",
@@ -244,6 +255,18 @@ class AnalysisEngine:
                 "remediation": "Require anti-CSRF tokens and same-site cookie protections for state-changing actions.",
                 "affected_resource": final_url,
                 "fingerprint": f"csrf:{path or final_url}",
+            })
+        if any(marker in body for marker in ["without csrf protection", "no csrf protection"]) and (
+            path == "/" or any(marker in path for marker in ["/admin", "/campaign", "/missions", "/telemetry"])
+        ):
+            findings.append({
+                "name": "Potential missing CSRF protection",
+                "severity": "Medium",
+                "description": "Application content advertises state-changing actions without anti-CSRF protection.",
+                "evidence": final_url or path or "/",
+                "remediation": "Require anti-CSRF tokens and same-site cookie protections for state-changing actions.",
+                "affected_resource": final_url or path or "/",
+                "fingerprint": f"csrf:{path or final_url or '/'}",
             })
         return findings
 

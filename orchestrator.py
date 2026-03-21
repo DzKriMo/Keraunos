@@ -234,6 +234,8 @@ class Orchestrator:
         raw_params = action.get("params")
         params = raw_params if isinstance(raw_params, dict) else {}
         params = self._default_params_for_tool(tool_name, params)
+        if self.mode == "webapp" and tool_name == "nmap" and self._webapp_routes_seen() < 5:
+            return {}
         if self._is_duplicate_tool_request(tool_name, params):
             return {}
         return {"type": "tool", "tool": tool_name, "params": params}
@@ -254,6 +256,7 @@ class Orchestrator:
             normalized.setdefault("target", base_url)
             if self.mode == "webapp":
                 normalized.setdefault("browser", True)
+            normalized = self._normalize_web_interact_params(normalized, base_url)
         if tool_name == "websocket_interact":
             normalized.setdefault("target", target_host)
             normalized.setdefault("path", "/ws")
@@ -266,6 +269,39 @@ class Orchestrator:
             normalized.setdefault("mode", "dir")
         if tool_name in {"msf_exploit", "msf_auxiliary"}:
             normalized.setdefault("rhosts", target_host)
+        return normalized
+
+    def _normalize_web_interact_params(self, params: Dict[str, Any], base_url: str) -> Dict[str, Any]:
+        normalized = dict(params)
+        target = str(normalized.get("target") or base_url).strip()
+        raw_url = str(normalized.get("url") or "").strip()
+        method = str(normalized.get("method", "GET")).upper()
+        browser_action = str(normalized.get("browser_action", "goto")).lower()
+
+        if raw_url and not normalized.get("path"):
+            parsed = urlparse(raw_url)
+            if parsed.scheme and parsed.netloc:
+                target = f"{parsed.scheme}://{parsed.netloc}"
+                path = parsed.path or "/"
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
+                normalized["path"] = path
+            elif raw_url.startswith("/"):
+                normalized["path"] = raw_url
+
+        normalized["target"] = target
+        normalized.setdefault("path", "/")
+        if not str(normalized["path"]).startswith("/"):
+            normalized["path"] = f"/{normalized['path']}"
+
+        has_stateful_request = any(
+            normalized.get(key) for key in ("payload", "json", "files", "headers", "cookies", "session_name")
+        )
+        if method != "GET" and browser_action == "goto":
+            normalized["browser"] = False
+        elif has_stateful_request and method != "GET" and browser_action != "request":
+            normalized["browser"] = False
+
         return normalized
 
     def _is_duplicate_tool_request(self, tool_name: str, params: Dict[str, Any]) -> bool:
@@ -546,12 +582,31 @@ class Orchestrator:
         seen = set()
         deduped = []
         for finding in merged:
+            if self.mode == "webapp" and self._is_webapp_noise_finding(finding):
+                continue
             key = finding.get("fingerprint") or (finding.get("name"), finding.get("evidence"))
             if key in seen:
                 continue
             seen.add(key)
             deduped.append(finding)
         self.state["findings"] = deduped
+
+    def _is_webapp_noise_finding(self, finding: Dict[str, Any]) -> bool:
+        name = str(finding.get("name") or "")
+        if not name.startswith("Exposed service:"):
+            return False
+        allowlist = ("80/", "443/", "3000/", "5000/", "5173/", "8000/", "8080/", "8081/", "8443/", "11434/")
+        return not any(port in name for port in allowlist)
+
+    def _webapp_routes_seen(self) -> int:
+        seen = set()
+        for item in self.state.get("history", []):
+            if item.get("tool") != "web_interact":
+                continue
+            path = str((item.get("params") or {}).get("path") or "")
+            if path:
+                seen.add(path.split("?", 1)[0])
+        return len(seen)
 
     def _emit_progress(self, stage: str, payload: Dict[str, Any]):
         if self.progress_callback:

@@ -224,6 +224,40 @@ def test_web_interact_ssrf_is_path_aware():
     assert "/fetch" in ssrf[0]["evidence"]
 
 
+def test_web_interact_detects_behavioral_sqli_and_idor():
+    engine = AnalysisEngine()
+    history = [
+        {
+            "tool": "web_interact",
+            "params": {"path": "/search", "payload": {"q": "' OR '1'='1"}},
+            "result": {
+                "full_url": "http://localhost:3000/search?q=%27+OR+%271%27%3D%271",
+                "status_code": 200,
+                "headers": {},
+                "response_preview": """
+                    <div class="result"><strong>admin</strong><span>Platform administrator</span></div>
+                    <div class="result"><strong>analyst</strong><span>Security analyst</span></div>
+                    <div class="result"><strong>guest</strong><span>Temporary guest account</span></div>
+                """,
+            },
+        },
+        {
+            "tool": "web_interact",
+            "params": {"path": "/account", "payload": {"id": "2"}},
+            "result": {
+                "full_url": "http://localhost:3000/account?id=2",
+                "status_code": 200,
+                "headers": {},
+                "response_preview": "Internal note: FLAG Authorization is not enforced on this view.",
+            },
+        },
+    ]
+    findings = engine.derive_findings(history)
+    names = {finding["name"] for finding in findings}
+    assert "Potential SQL injection indicator" in names
+    assert "Potential IDOR on account endpoint" in names
+
+
 def test_findings_include_confidence_and_category():
     engine = AnalysisEngine()
     history = [

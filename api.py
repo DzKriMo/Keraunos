@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import requests
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Set
@@ -91,6 +92,85 @@ class ConfirmationResponse(BaseModel):
     confirm_id: str
     approved: bool
 
+
+class LLMProviderRequest(BaseModel):
+    provider: str = Field(..., pattern="^(openrouter|ollama)$")
+
+
+class LLMModelRequest(BaseModel):
+    model: str = Field(..., min_length=1)
+
+
+OPENROUTER_PROVIDER = "openrouter"
+OLLAMA_PROVIDER = "ollama"
+OPENROUTER_DEFAULT_MODEL = "stepfun/step-3.5-flash:free"
+OLLAMA_DEFAULT_MODEL = "deepseek-r1:8b"
+OPENROUTER_DEFAULT_URL = "https://openrouter.ai/api/v1"
+
+
+def _default_ollama_url() -> str:
+    configured = os.getenv("KERAUNOS_OLLAMA_URL", "").strip()
+    if configured:
+        return configured
+    if Path("/.dockerenv").exists():
+        return "http://host.docker.internal:11434"
+    return "http://localhost:11434"
+
+
+OLLAMA_DEFAULT_URL = _default_ollama_url()
+
+_initial_provider = os.getenv("KERAUNOS_LLM_PROVIDER", "").strip().lower()
+_initial_model = os.getenv("KERAUNOS_LLM_MODEL", "").strip()
+_initial_url = os.getenv("KERAUNOS_LLM_URL", "").strip()
+
+_llm_presets = {
+    OPENROUTER_PROVIDER: {
+        "provider": OPENROUTER_PROVIDER,
+        "model": _initial_model if _initial_provider == OPENROUTER_PROVIDER and _initial_model else OPENROUTER_DEFAULT_MODEL,
+        "url": _initial_url if _initial_provider == OPENROUTER_PROVIDER and _initial_url else OPENROUTER_DEFAULT_URL,
+    },
+    OLLAMA_PROVIDER: {
+        "provider": OLLAMA_PROVIDER,
+        "model": OLLAMA_DEFAULT_MODEL,
+        "url": _initial_url if _initial_provider == OLLAMA_PROVIDER and _initial_url else OLLAMA_DEFAULT_URL,
+    },
+}
+
+
+def _apply_llm_preset(provider: str) -> Dict[str, str]:
+    preset = _llm_presets[provider]
+    os.environ["KERAUNOS_LLM_PROVIDER"] = preset["provider"]
+    os.environ["KERAUNOS_LLM_MODEL"] = preset["model"]
+    os.environ["KERAUNOS_LLM_URL"] = preset["url"]
+    return dict(preset)
+
+
+def _resolve_active_llm_provider() -> str:
+    provider = os.getenv("KERAUNOS_LLM_PROVIDER", "").strip().lower()
+    if provider in _llm_presets:
+        return provider
+    return OPENROUTER_PROVIDER if os.getenv("OPENROUTER_API_KEY", "").strip() else OLLAMA_PROVIDER
+
+
+def _fetch_ollama_models() -> list[dict]:
+    base_url = _llm_presets[OLLAMA_PROVIDER]["url"].rstrip("/")
+    response = requests.get(f"{base_url}/api/tags", timeout=5)
+    response.raise_for_status()
+    payload = response.json()
+    models = []
+    for item in payload.get("models", []):
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        models.append({
+            "id": name,
+            "label": name,
+            "size": item.get("size"),
+            "modified_at": item.get("modified_at"),
+        })
+    models.sort(key=lambda entry: entry["id"].lower())
+    return models
+
 # ── Dashboard ───────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -107,6 +187,13 @@ def health():
 @app.get("/llm/status")
 def get_llm_status():
     from llm_interface import LLMInterface
+    active_config = _apply_llm_preset(_resolve_active_llm_provider())
+    ollama_models = []
+    ollama_error = ""
+    try:
+        ollama_models = _fetch_ollama_models()
+    except Exception as exc:
+        ollama_error = str(exc)
     try:
         llm = LLMInterface()
         llm.enabled = _llm_enabled
@@ -124,6 +211,25 @@ def get_llm_status():
         "connected": connected,
         "model": model,
         "provider": provider,
+        "url": active_config["url"],
+        "available_providers": [
+            {
+                "id": OPENROUTER_PROVIDER,
+                "label": "OpenRouter",
+                "model": _llm_presets[OPENROUTER_PROVIDER]["model"],
+            },
+            {
+                "id": OLLAMA_PROVIDER,
+                "label": "Ollama",
+                "model": _llm_presets[OLLAMA_PROVIDER]["model"],
+            },
+        ],
+        "available_models": {
+            OLLAMA_PROVIDER: ollama_models,
+        },
+        "available_models_error": {
+            OLLAMA_PROVIDER: ollama_error,
+        },
         "error": error,
     }
 
@@ -132,6 +238,49 @@ def toggle_llm():
     global _llm_enabled
     _llm_enabled = not _llm_enabled
     return {"enabled": _llm_enabled}
+
+
+@app.post("/llm/provider")
+def set_llm_provider(request: LLMProviderRequest):
+    provider = request.provider.strip().lower()
+    if provider not in _llm_presets:
+        raise HTTPException(status_code=400, detail="Unsupported LLM provider")
+    preset = _apply_llm_preset(provider)
+    return {
+        "provider": preset["provider"],
+        "model": preset["model"],
+        "url": preset["url"],
+        "enabled": _llm_enabled,
+    }
+
+
+@app.get("/llm/models")
+def list_llm_models(provider: str = Query(..., pattern="^(openrouter|ollama)$")):
+    provider = provider.strip().lower()
+    if provider == OLLAMA_PROVIDER:
+        try:
+            return {"provider": provider, "items": _fetch_ollama_models()}
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not fetch Ollama models: {exc}") from exc
+    return {"provider": provider, "items": []}
+
+
+@app.post("/llm/model")
+def set_llm_model(request: LLMModelRequest):
+    provider = _resolve_active_llm_provider()
+    model = request.model.strip()
+    if provider == OLLAMA_PROVIDER:
+        available = {item["id"] for item in _fetch_ollama_models()}
+        if model not in available:
+            raise HTTPException(status_code=400, detail="Selected Ollama model is not available")
+    _llm_presets[provider]["model"] = model
+    os.environ["KERAUNOS_LLM_MODEL"] = model
+    return {
+        "provider": provider,
+        "model": model,
+        "url": _llm_presets[provider]["url"],
+        "enabled": _llm_enabled,
+    }
 
 # ── Reports ─────────────────────────────────────────────────────────
 @app.get("/reports")

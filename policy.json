@@ -18,7 +18,8 @@
     "enum4linux": 300,
     "sslscan": 120,
     "dns_enum": 180,
-    "web_interact": 120
+    "web_interact": 120,
+    "websocket_interact": 120
   },
   "allowed_tools": [
     "nmap",
@@ -40,7 +41,8 @@
     "msf_payload",
     "msf_session",
     "hydra",
-    "web_interact"
+    "web_interact",
+    "websocket_interact"
   ],
   "blocked_tools_require_unlock": [],
   "blocked_flags": {

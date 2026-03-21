@@ -40,7 +40,18 @@ class WebInteractWrapper(ToolWrapper):
         run_dir = Path(params.get("__run_dir", "."))
 
         url = self._build_url(target, path, payload if method == "GET" else {})
-        if browser:
+        browser_safe_navigation = (
+            browser
+            and method == "GET"
+            and json_payload is None
+            and not files
+            and not payload
+            and not headers
+            and not cookies
+            and not session_name
+            and browser_action in {"goto", "fill", "click", "type", "evaluate"}
+        )
+        if browser_safe_navigation:
             browser_result = self._run_browser(url, params, timeout)
             if browser_result:
                 return browser_result

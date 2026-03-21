@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from tool_wrappers.base import ToolWrapper
 
@@ -9,6 +10,7 @@ class GobusterWrapper(ToolWrapper):
     tool_name = "gobuster"
     risk_level = "medium"
 
+    DEFAULT_FALLBACK_WORDLIST = str(Path(__file__).resolve().parents[2] / "data" / "default_web_paths.txt")
     DEFAULT_WORDLISTS = {
         "dir": "/usr/share/wordlists/dirb/common.txt",
         "dns": "/usr/share/wordlists/dnsmap.txt",
@@ -26,6 +28,7 @@ class GobusterWrapper(ToolWrapper):
         timeout = int(params.get("timeout", 300))
         stop_callback = params.get("__stop_callback")
         wordlist = params.get("wordlist", self.DEFAULT_WORDLISTS.get(mode, ""))
+        wordlist = self._resolve_wordlist(wordlist, mode)
         extensions = params.get("extensions")  # e.g. "php,html,txt"
         threads = params.get("threads", 10)
 
@@ -44,10 +47,21 @@ class GobusterWrapper(ToolWrapper):
         return {
             "url": url,
             "mode": mode,
+            "wordlist": wordlist,
             "results": results,
             "count": len(results),
             "raw": stdout,
         }
+
+    def _resolve_wordlist(self, requested: str, mode: str) -> str:
+        candidate = Path(str(requested))
+        if candidate.exists():
+            return str(candidate)
+        if mode == "dir":
+            fallback = Path(self.DEFAULT_FALLBACK_WORDLIST)
+            if fallback.exists():
+                return str(fallback)
+        return str(candidate)
 
     def _parse_output(self, raw: str, mode: str) -> list:
         """Parse gobuster output by mode."""

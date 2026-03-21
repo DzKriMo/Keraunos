@@ -930,6 +930,11 @@
                 <span id="aiModel"
                     style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">OLLAMA</span>
             </div>
+            <select id="llmProviderSelect" onchange="changeLLMProvider()"
+                style="background: rgba(15, 23, 42, 0.9); color: var(--text-primary); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 700;">
+                <option value="openrouter">OpenRouter</option>
+                <option value="ollama">Ollama · deepseek-r1:8b</option>
+            </select>
             <label class="switch">
                 <input type="checkbox" id="llmToggle" checked onchange="toggleLLM()">
                 <span class="slider"></span>
@@ -1901,9 +1906,13 @@
                 const indicator = document.getElementById('aiIndicator');
                 const toggle = document.getElementById('llmToggle');
                 const modelSpan = document.getElementById('aiModel');
+                const providerSelect = document.getElementById('llmProviderSelect');
                 const providerLabel = status.provider ? `${status.provider.toUpperCase()} :: ` : '';
 
                 toggle.checked = status.enabled;
+                if (providerSelect && status.provider) {
+                    providerSelect.value = status.provider;
+                }
                 if (status.enabled && status.connected) {
                     indicator.className = 'status-dot-on';
                     modelSpan.textContent = `${providerLabel}${status.model}`;
@@ -1917,6 +1926,21 @@
             } catch (e) {
                 document.getElementById('aiIndicator').className = 'status-dot-off';
                 document.getElementById('aiModel').textContent = 'API ERROR';
+            }
+        }
+
+        async function changeLLMProvider() {
+            const provider = document.getElementById('llmProviderSelect').value;
+            try {
+                await apiFetch('/llm/provider', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider })
+                });
+                fetchLLMStatus();
+            } catch (e) {
+                console.error('Failed to switch LLM provider', e);
+                addEvent('error', 'LLM Switch Failed', e.message || 'Could not switch LLM provider');
             }
         }
 
@@ -1950,7 +1974,13 @@
                 data.items.forEach(rep => {
                     const div = document.createElement('div');
                     div.className = 'report-item';
-                    const date = new Date(rep.created_at).toLocaleDateString();
+                    const date = new Date(rep.created_at).toLocaleString([], {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
                     const displayId = (rep.run_id || 'direct').toString();
                     const shortId = displayId === 'direct' ? 'DIRECT' : displayId.slice(0, 8);
                     div.innerHTML = `
