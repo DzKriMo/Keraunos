@@ -1,0 +1,14 @@
+{
+  "phase": "recon",
+  "history": [],
+  "findings": [],
+  "reasoning_trace": [
+    {
+      "timestamp": 1774108381.0774503,
+      "thought": "a"
+    }
+  ],
+  "target": "example.com",
+  "scope": "",
+  "settings": {}
+}

@@ -118,6 +118,12 @@
             border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
+        .status-pill.paused {
+            background: rgba(245, 158, 11, 0.14);
+            color: var(--accent-amber);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
         .status-dot {
             width: 8px;
             height: 8px;
@@ -310,6 +316,16 @@
 
         .btn-danger:hover {
             background: var(--glow-red);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--accent-amber);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(245, 158, 11, 0.12);
         }
 
         /* ── Stats Bar ──────────────────────────────────────────── */
@@ -576,6 +592,68 @@
             color: var(--accent-green);
         }
 
+        .preview-shell {
+            position: relative;
+        }
+
+        .browser-overlay {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: min(320px, calc(100% - 32px));
+            z-index: 5;
+            background: rgba(10, 14, 23, 0.88);
+            border: 1px solid rgba(59, 130, 246, 0.24);
+            border-radius: 12px;
+            box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+            backdrop-filter: blur(10px);
+        }
+
+        .browser-overlay-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(42, 53, 80, 0.65);
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+        }
+
+        .browser-action-list {
+            max-height: 180px;
+            overflow-y: auto;
+            padding: 8px 10px 10px;
+        }
+
+        .browser-action-item {
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(26, 34, 52, 0.9);
+            border: 1px solid rgba(42, 53, 80, 0.45);
+            margin-bottom: 8px;
+        }
+
+        .browser-action-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .browser-action-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .browser-action-detail {
+            margin-top: 4px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            word-break: break-word;
+        }
+
         /* ── Confirmation Modal ─────────────────────────────────── */
         .modal-overlay {
             display: none;
@@ -792,6 +870,41 @@
             flex-direction: column;
             gap: 15px;
         }
+
+        /* ── Neural Reasoning Panel ───────────────────────────────── */
+        .reasoning-panel {
+            background: #0f172a;
+            border: 1px solid var(--accent-purple);
+            border-radius: 12px;
+            padding: 16px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: #c084fc;
+            overflow-y: auto;
+            max-height: 140px;
+            box-shadow: inset 0 0 10px rgba(139, 92, 246, 0.2);
+            position: relative;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(192, 132, 252, 0.3);
+        }
+
+        .reasoning-panel::before {
+            content: "NEURAL REASONING ENGINE";
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            font-size: 9px;
+            font-weight: 700;
+            opacity: 0.5;
+            letter-spacing: 1px;
+        }
+
+        .thought-block {
+            margin-bottom: 10px;
+            border-left: 2px solid var(--accent-purple);
+            padding-left: 10px;
+            opacity: 0.9;
+        }
     </style>
 </head>
 
@@ -841,22 +954,55 @@
                     <div class="card-header">MISSION CONFIGURATION</div>
                     <div class="card-body">
                         <div class="input-group">
+                            <label>Assessment Mode</label>
+                            <select id="modeInput" onchange="onModeChange()">
+                                <option value="webapp">Web App Assessment (LLM-Driven)</option>
+                                <option value="system">System Assessment (LLM-Driven)</option>
+                                <option value="ai_agent">AI Agent Assessment (LLM-Driven)</option>
+                                <option value="legacy">Legacy Autonomous Mode</option>
+                            </select>
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">
+                                <b>Note:</b> Assessment modes prioritize the LLM's cognitive focus on specific areas
+                                (Web, System, or AI).
+                            </div>
+                        </div>
+                        <div class="input-group">
                             <label>Target Host</label>
-                            <input type="text" id="targetInput" placeholder="10.129.1.133" value="10.129.1.133">
+                            <input type="text" id="targetInput" placeholder="e.g. 10.129.1.133" value="10.129.2.94"
+                                oninput="onModeChange()">
                         </div>
                         <div class="input-group">
                             <label>Scope / CIDR</label>
-                            <input type="text" id="scopeInput" placeholder="10.129.0.0/24">
+                            <input type="text" id="scopeInput" placeholder="e.g. 10.129.1.0/24" value="10.129.2.94/32">
                         </div>
                         <div class="input-group">
                             <label>Complexity Limit (Steps)</label>
-                            <input type="number" id="maxStepsInput" value="40" min="1" max="200">
+                            <input type="number" id="maxStepsInput" value="40" min="1" max="500">
                         </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
-                            <button class="btn btn-primary" id="startBtn" onclick="startRun()">LAUNCH MISSION</button>
-                            <button class="btn btn-danger" id="cancelBtn" onclick="cancelRun()"
-                                style="display:none;">ABORT RUN</button>
+                        <div class="input-group">
+                            <label>Mode Settings (JSON)</label>
+                            <input type="text" id="settingsInput" placeholder='Optional JSON settings' value="">
                         </div>
+                        <div class="input-group">
+                            <label>API Key</label>
+                            <input type="password" id="apiKeyInput" placeholder="Optional X-API-Key" value=""
+                                oninput="persistApiKey()">
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">
+                                Required only when <code>KERAUNOS_API_KEY</code> is configured on the server.
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" id="startBtn" onclick="startRun()"
+                            style="width: 100%; justify-content: center; margin-top: 10px;">
+                            LAUNCH MISSION
+                        </button>
+                        <button class="btn btn-secondary" id="pauseBtn" onclick="togglePauseRun()"
+                            style="width: 100%; justify-content: center; display: none;">
+                            PAUSE MISSION
+                        </button>
+                        <button class="btn btn-danger" id="abortBtn" onclick="abortRun()"
+                            style="width: 100%; justify-content: center; display: none;">
+                            ABORT MISSION
+                        </button>
                     </div>
                 </div>
 
@@ -906,6 +1052,37 @@
                     <div class="stat-card">
                         <div class="stat-label">Critical/High</div>
                         <div class="stat-value critical" id="statCriticalHigh">0</div>
+                    </div>
+                </div>
+
+                <div class="card" id="reasoningContainer">
+                    <div class="card-header">MODEL REASONING (LIVE)</div>
+                    <div class="card-body" style="padding: 12px;">
+                        <div class="reasoning-panel" id="reasoningPanel">
+                            <div class="empty-state" style="padding: 24px 8px;">Awaiting model reasoning...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">LIVE TARGET PREVIEW</div>
+                    <div class="card-body" style="padding: 12px;">
+                        <div class="preview-shell">
+                            <iframe id="targetPreview" title="Target preview"
+                                style="width: 100%; min-height: 320px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-primary);"
+                                sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+                            <div class="browser-overlay">
+                                <div class="browser-overlay-header">
+                                    <span>Browser Actions</span>
+                                    <span id="browserActionCount">0</span>
+                                </div>
+                                <div class="browser-action-list" id="browserActionList">
+                                    <div class="empty-state" id="browserActionEmpty" style="padding: 16px 10px;">
+                                        Waiting for browser telemetry...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -970,7 +1147,7 @@
             <h3>⚠️ Action Requires Confirmation</h3>
             <pre id="confirmDetail"></pre>
             <div class="modal-actions">
-                <button class="btn btn-danger" onclick="respondConfirmation(false)">✕ Deny</button>
+                <button class="btn btn-danger" onclick="respondConfirmation(false)">�• Deny</button>
                 <button class="btn btn-primary" onclick="respondConfirmation(true)">✓ Approve</button>
             </div>
         </div>
@@ -983,9 +1160,12 @@
         let startTime = null;
         let timerInterval = null;
         let eventCounter = 0;
+        let browserActionCounter = 0;
         let pendingConfirmId = null;
+        let currentRunStatus = 'idle';
 
         const API_BASE = window.location.origin;
+        const API_KEY_STORAGE = 'keraunos.apiKey';
 
         const PHASE_TOOLS = {
             recon: ['nmap', 'dns_enum', 'http_probe'],
@@ -999,22 +1179,129 @@
         const toolsRun = new Set();
         const findings = [];
 
+        function getApiKey() {
+            const input = document.getElementById('apiKeyInput');
+            return (input ? input.value : '').trim();
+        }
+
+        function persistApiKey() {
+            const key = getApiKey();
+            if (key) {
+                localStorage.setItem(API_KEY_STORAGE, key);
+            } else {
+                localStorage.removeItem(API_KEY_STORAGE);
+            }
+        }
+
+        function restoreApiKey() {
+            const saved = localStorage.getItem(API_KEY_STORAGE) || '';
+            const input = document.getElementById('apiKeyInput');
+            if (input) input.value = saved;
+        }
+
+        function buildHeaders(extraHeaders = {}) {
+            const headers = new Headers(extraHeaders);
+            const key = getApiKey();
+            if (key) headers.set('X-API-Key', key);
+            return headers;
+        }
+
+        async function apiFetch(path, options = {}) {
+            const requestOptions = { ...options };
+            requestOptions.headers = buildHeaders(options.headers || {});
+            return fetch(`${API_BASE}${path}`, requestOptions);
+        }
+
+        function buildWebSocketUrl(runId) {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = new URL(`${protocol}//${window.location.host}/ws/${runId}`);
+            const key = getApiKey();
+            if (key) url.searchParams.set('x_api_key', key);
+            return url.toString();
+        }
+
+        async function openReport(path) {
+            const res = await apiFetch(path);
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try {
+                    const payload = await res.json();
+                    detail = payload && (payload.detail || payload.error || detail);
+                } catch (e) {
+                    // Ignore response parsing failures.
+                }
+                throw new Error(detail);
+            }
+
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            window.open(blobUrl, '_blank', 'noopener');
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        }
+
+        async function downloadReport(path, fallbackName) {
+            const res = await apiFetch(path);
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try {
+                    const payload = await res.json();
+                    detail = payload && (payload.detail || payload.error || detail);
+                } catch (e) {
+                    // Ignore response parsing failures.
+                }
+                throw new Error(detail);
+            }
+
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+            const filename = (match && match[1]) || fallbackName || 'report.bin';
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        }
+
         // ── API Calls ──────────────────────────────────────────────
         async function startRun() {
             const target = document.getElementById('targetInput').value.trim();
             const scope = document.getElementById('scopeInput').value.trim();
+            const mode = document.getElementById('modeInput').value;
             const maxSteps = parseInt(document.getElementById('maxStepsInput').value);
+            const settingsRaw = document.getElementById('settingsInput').value.trim();
             if (!target) return;
 
+            let settings = {};
+            if (settingsRaw) {
+                try {
+                    settings = JSON.parse(settingsRaw);
+                } catch (e) {
+                    addEvent('error', 'Invalid settings JSON', e.message || 'Could not parse settings');
+                    return;
+                }
+            }
+
             resetDashboard();
+            updatePreview(mode, target);
 
             try {
-                const res = await fetch(`${API_BASE}/runs`, {
+                const res = await apiFetch('/runs', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target, scope, max_steps: maxSteps }),
+                    body: JSON.stringify({ target, scope, mode, max_steps: maxSteps, settings }),
                 });
                 const run = await res.json();
+                if (!res.ok) {
+                    const detail = run && (run.detail || run.error || JSON.stringify(run));
+                    throw new Error(detail || `HTTP ${res.status}`);
+                }
+                if (!run || !run.id) {
+                    throw new Error('API returned no run id');
+                }
                 currentRunId = run.id;
                 // Update URL to include run_id without reloading
                 const newUrl = new URL(window.location);
@@ -1023,41 +1310,43 @@
 
                 initRun(run);
                 connectWebSocket(run.id);
+                startPolling();
             } catch (e) {
                 addEvent('error', 'Connection Failed', `Could not reach API: ${e.message}`);
             }
         }
 
         function initRun(run) {
-            currentRunId = run.id;
-            document.getElementById('runId').textContent = `RUN: ${run.id.slice(0, 8)}`;
+            currentRunId = run && run.id ? run.id : null;
+            const runLabel = currentRunId ? currentRunId.slice(0, 8) : 'UNKNOWN';
+            document.getElementById('runId').textContent = `RUN: ${runLabel}`;
+            setStatusFromValue(run.status || 'queued');
+            updateRunControls(run.status || 'queued');
+            document.getElementById('modeInput').value = run.mode || 'system';
+            document.getElementById('settingsInput').value = JSON.stringify(run.settings_json || {});
+            updatePreview(run.mode || 'system', run.target || '');
 
-            const statusMap = {
-                'queued': ['idle', 'QUEUED'],
-                'running': ['running', 'RUNNING'],
-                'complete': ['complete', 'COMPLETE'],
-                'failed': ['failed', 'FAILED'],
-                'cancelled': ['failed', 'CANCELLED'],
-                'partial': ['complete', 'PARTIAL']
-            };
-
-            const [cls, text] = statusMap[run.status] || ['idle', run.status.toUpperCase()];
-            setStatus(cls, text);
-
-            if (run.status === 'running') {
-                document.getElementById('startBtn').disabled = true;
-                document.getElementById('cancelBtn').style.display = '';
-                startTimer(run.updated_at);
+            if (['queued', 'running', 'paused'].includes(run.status)) {
+                startTimer(run.created_at || run.updated_at);
             } else if (['complete', 'failed', 'cancelled', 'partial'].includes(run.status)) {
-                resetButtons();
+                stopTimer();
             }
         }
 
-        async function cancelRun() {
+        async function abortRun() {
             if (!currentRunId) return;
             try {
-                await fetch(`${API_BASE}/runs/${currentRunId}/cancel`, { method: 'POST' });
-                addEvent('info', 'Cancel Requested', 'Waiting for current tool to finish...');
+                await apiFetch(`/runs/${currentRunId}/cancel`, { method: 'POST' });
+                addEvent('info', 'Abort Requested', 'Waiting for current tool to finish...');
+            } catch (e) { /* ignore */ }
+        }
+
+        async function togglePauseRun() {
+            if (!currentRunId) return;
+            const endpoint = currentRunStatus === 'paused' ? 'resume' : 'pause';
+            try {
+                await apiFetch(`/runs/${currentRunId}/${endpoint}`, { method: 'POST' });
+                addEvent('info', endpoint === 'pause' ? 'Pause Requested' : 'Resume Requested', 'State update requested from controller');
             } catch (e) { /* ignore */ }
         }
 
@@ -1065,7 +1354,7 @@
             document.getElementById('confirmModal').classList.remove('active');
             if (!currentRunId || !pendingConfirmId) return;
             try {
-                await fetch(`${API_BASE}/runs/${currentRunId}/confirm`, {
+                await apiFetch(`/runs/${currentRunId}/confirm`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ confirm_id: pendingConfirmId, approved }),
@@ -1079,8 +1368,7 @@
         function connectWebSocket(runId) {
             if (ws) ws.close();
 
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws/${runId}`);
+            ws = new WebSocket(buildWebSocketUrl(runId));
 
             ws.onmessage = (msg) => {
                 const data = JSON.parse(msg.data);
@@ -1088,7 +1376,7 @@
             };
 
             ws.onclose = (e) => {
-                if (currentRunId && !['complete', 'failed', 'cancelled', 'partial'].includes(document.getElementById('statusText').innerText.toLowerCase())) {
+                if (currentRunId && !['complete', 'failed', 'cancelled', 'partial'].includes(currentRunStatus)) {
                     // Unexpected close while running - try to reconnect
                     console.log('WS closed, attempting reconnect in 2s...');
                     setTimeout(() => connectWebSocket(runId), 2000);
@@ -1104,7 +1392,7 @@
             const pollId = setInterval(async () => {
                 if (!currentRunId) { clearInterval(pollId); return; }
                 try {
-                    const res = await fetch(`${API_BASE}/runs/${currentRunId}`);
+                    const res = await apiFetch(`/runs/${currentRunId}`);
                     const run = await res.json();
                     if (['complete', 'failed', 'cancelled', 'partial'].includes(run.status)) {
                         clearInterval(pollId);
@@ -1117,7 +1405,7 @@
         async function pollFinalStatus() {
             if (!currentRunId) return;
             try {
-                const res = await fetch(`${API_BASE}/runs/${currentRunId}`);
+                const res = await apiFetch(`/runs/${currentRunId}`);
                 const run = await res.json();
                 handleRunComplete(run);
             } catch (e) { /* ignore */ }
@@ -1128,23 +1416,36 @@
             const stage = data.stage;
             const payload = data.payload || {};
 
+            if (['heartbeat', 'ping'].includes(stage)) return;
+
             switch (stage) {
+                case 'llm_reasoning':
+                    pushReasoningThought(payload.thought || '');
+                    break;
+
+                case 'navigation':
+                    if (payload.url) {
+                        const frame = document.getElementById('targetPreview');
+                        if (frame) frame.src = payload.url;
+                    }
+                    break;
+
                 case 'initial_state':
-                    // Populate everything at once
                     if (payload.history) {
                         let lastToolWithOutput = null;
                         payload.history.forEach(evt => {
-                            // Synthesize events from history
                             addEvent('tool', `Tool: ${evt.tool}`, JSON.stringify(evt.params || {}));
                             if (evt.result) {
                                 toolsRun.add(evt.tool);
+                                if (evt.result.telemetry || evt.result.browser_action) {
+                                    recordBrowserAction(evt.tool, evt.result);
+                                }
                                 const outOk = !evt.result.error;
-                                addEvent(outOk ? 'finding' : 'error', `✓ ${evt.tool} result`, JSON.stringify(evt.result).slice(0, 100));
+                                addEvent(outOk ? 'finding' : 'error', `OK ${evt.tool} result`, JSON.stringify(evt.result).slice(0, 100));
                                 lastToolWithOutput = evt;
                             }
                         });
 
-                        // Show output of the last tool found
                         if (lastToolWithOutput) {
                             const t = lastToolWithOutput;
                             document.getElementById('currentTool').textContent = t.tool;
@@ -1159,19 +1460,27 @@
                         renderFindings();
                         updateStats();
                     }
+                    if (payload.reasoning_trace && payload.reasoning_trace.length) {
+                        const panel = document.getElementById('reasoningPanel');
+                        panel.innerHTML = '';
+                        payload.reasoning_trace.forEach(entry => pushReasoningThought(entry.thought || ''));
+                    }
                     updatePhases();
                     setStatusFromValue(payload.status);
+                    updateRunControls(payload.status);
                     break;
 
                 case 'started':
-                    addEvent('info', 'Pentest Started', `Target: ${payload.target} | Scope: ${payload.scope}`);
+                    setStatusFromValue('running');
+                    updateRunControls('running');
+                    addEvent('info', 'Assessment Started', `Mode: ${payload.mode || 'legacy'} | Target: ${payload.target} | Scope: ${payload.scope}`);
                     break;
 
                 case 'tool_executing':
                     const tool = payload.tool || '?';
                     toolsRun.add(tool);
                     document.getElementById('currentTool').textContent = tool;
-                    document.getElementById('toolOutput').innerHTML = `<span class="cmd">$ ${tool}</span> ${escapeHtml(JSON.stringify(payload.params || {}))}\\n\\nExecuting...`;
+                    document.getElementById('toolOutput').innerHTML = `<span class="cmd">$ ${tool}</span> ${escapeHtml(JSON.stringify(payload.params || {}))}\n\nExecuting...`;
                     addEvent('tool', `Running: ${tool}`, JSON.stringify(payload.params || {}));
                     updatePhases();
                     updateStats();
@@ -1180,14 +1489,13 @@
                 case 'tool_executed':
                     const ok = payload.ok;
                     const toolName = payload.tool || '?';
-                    if (ok) {
-                        addEvent('finding', `✓ ${toolName} complete`, payload.summary || 'Success');
-                    } else {
-                        addEvent('error', `✗ ${toolName} failed`, payload.error || 'Unknown error');
+                    addEvent(ok ? 'finding' : 'error', `${ok ? 'OK' : 'FAIL'} ${toolName}`, payload.summary || payload.error || '');
+                    if (payload.result) {
+                        recordBrowserAction(toolName, payload.result);
                     }
                     if (payload.output) {
                         const out = document.getElementById('toolOutput');
-                        out.innerHTML = `<span class="cmd">$ ${escapeHtml(toolName)}</span>\\n\\n${colorizeOutput(payload.output)}`;
+                        out.innerHTML = `<span class="cmd">$ ${escapeHtml(toolName)}</span>\n\n${colorizeOutput(payload.output)}`;
                         out.scrollTop = out.scrollHeight;
                     }
                     break;
@@ -1212,6 +1520,18 @@
                     addEvent('confirm', 'Confirmation Required', payload.description || '');
                     break;
 
+                case 'paused':
+                    setStatus('paused', 'PAUSED');
+                    updateRunControls('paused');
+                    addEvent('info', 'Mission Paused', payload.reason || 'Pause requested');
+                    break;
+
+                case 'resumed':
+                    setStatus('running', 'RUNNING');
+                    updateRunControls('running');
+                    addEvent('info', 'Mission Resumed', payload.reason || 'Resumed');
+                    break;
+
                 case 'cancelled':
                     setStatus('failed', 'CANCELLED');
                     addEvent('error', 'Run Cancelled', payload.reason || 'User or policy cancelled');
@@ -1221,14 +1541,16 @@
 
                 case 'completed':
                     setStatus('complete', 'COMPLETE');
-                    addEvent('finding', '✓ Assessment Complete', `${payload.steps || 0} steps executed`);
+                    addEvent('finding', 'Assessment Complete', `${payload.steps || 0} steps executed`);
                     updatePhase('report', 'done');
                     stopTimer();
                     resetButtons();
+                    fetchReports();
                     break;
 
                 case 'report_generated':
-                    addEvent('finding', '📄 Report Generated', `Target: ${payload.target}`);
+                    addEvent('finding', 'Report Generated', `Target: ${payload.target}`);
+                    fetchReports();
                     break;
 
                 case 'max_steps_reached':
@@ -1236,10 +1558,15 @@
                     addEvent('info', 'Max Steps Reached', `Partial report generated after ${payload.max_steps} steps`);
                     stopTimer();
                     resetButtons();
+                    fetchReports();
                     break;
 
                 case 'analysis_complete':
                     addEvent('info', 'LLM Analysis', `${payload.findings || 0} new findings from analysis`);
+                    break;
+
+                case 'llm_validation_failed':
+                    addEvent('info', 'LLM Guardrail Triggered', 'Invalid model action ignored; fallback planner active');
                     break;
 
                 default:
@@ -1251,14 +1578,22 @@
             const status = run.status || 'complete';
             if (status === 'cancelled') {
                 setStatus('failed', 'CANCELLED');
+            } else if (status === 'paused') {
+                setStatus('paused', 'PAUSED');
+            } else if (status === 'running' || status === 'queued') {
+                setStatusFromValue(status);
             } else if (status === 'failed') {
                 setStatus('failed', 'FAILED');
                 addEvent('error', 'Run Failed', run.error_message || '');
             } else {
                 setStatus('complete', status.toUpperCase());
             }
-            stopTimer();
-            resetButtons();
+            if (['complete', 'failed', 'cancelled', 'partial'].includes(status)) {
+                stopTimer();
+                resetButtons();
+            } else {
+                updateRunControls(status);
+            }
         }
 
         // ── UI Helpers ─────────────────────────────────────────────
@@ -1286,6 +1621,31 @@
 
             // Keep max 100 events
             while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+        }
+
+        function recordBrowserAction(toolName, result) {
+            const telemetry = result.telemetry || {};
+            const action = result.browser_action || telemetry.action || 'request';
+            const finalUrl = result.full_url || result.navigation_url || telemetry.final_url || result.url || '';
+            const selector = telemetry.selector || result.browser_selector || '';
+            const empty = document.getElementById('browserActionEmpty');
+            if (empty) empty.remove();
+
+            browserActionCounter++;
+            document.getElementById('browserActionCount').textContent = browserActionCounter;
+
+            const list = document.getElementById('browserActionList');
+            const item = document.createElement('div');
+            item.className = 'browser-action-item';
+            item.innerHTML = `
+                <div class="browser-action-title">${escapeHtml(toolName)} :: ${escapeHtml(action)}</div>
+                <div class="browser-action-detail">${escapeHtml([selector, finalUrl].filter(Boolean).join(' | '))}</div>
+            `;
+            list.prepend(item);
+
+            while (list.children.length > 12) {
+                list.removeChild(list.lastChild);
+            }
         }
 
         function typeIcon(type) {
@@ -1351,9 +1711,11 @@
         }
 
         function setStatusFromValue(status) {
+            currentRunStatus = (status || 'idle').toLowerCase();
             const statusMap = {
-                'queued': ['idle', 'QUEUED'],
+                'queued': ['running', 'INITIALIZING'],
                 'running': ['running', 'RUNNING'],
+                'paused': ['paused', 'PAUSED'],
                 'complete': ['complete', 'COMPLETE'],
                 'failed': ['failed', 'FAILED'],
                 'cancelled': ['failed', 'CANCELLED'],
@@ -1363,22 +1725,103 @@
             setStatus(cls, text);
         }
 
+        function updateRunControls(status) {
+            const normalized = (status || currentRunStatus || 'idle').toLowerCase();
+            currentRunStatus = normalized;
+            const startBtn = document.getElementById('startBtn');
+            const abortBtn = document.getElementById('abortBtn');
+            const pauseBtn = document.getElementById('pauseBtn');
+            const active = ['queued', 'running', 'paused'].includes(normalized);
+
+            startBtn.disabled = active;
+            abortBtn.style.display = active ? '' : 'none';
+            pauseBtn.style.display = active ? '' : 'none';
+            pauseBtn.textContent = normalized === 'paused' ? 'RESUME MISSION' : 'PAUSE MISSION';
+        }
+
         function startTimer(startTimeStr) {
-            startTime = startTimeStr ? new Date(startTimeStr).getTime() : Date.now();
-            if (timerInterval) clearInterval(timerInterval);
-            timerInterval = setInterval(() => {
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const parsed = startTimeStr ? new Date(startTimeStr).getTime() : NaN;
+            startTime = Number.isFinite(parsed) ? parsed : Date.now();
+            const render = () => {
+                const elapsed = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
                 const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
                 const s = String(elapsed % 60).padStart(2, '0');
                 document.getElementById('elapsedTime').textContent = `${m}:${s}`;
-            }, 1000);
+            };
+
+            if (timerInterval) clearInterval(timerInterval);
+            render();
+            timerInterval = setInterval(render, 1000);
         }
 
-        function stopTimer() { if (timerInterval) clearInterval(timerInterval); }
+        function stopTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = null;
+        }
 
         function resetButtons() {
+            currentRunStatus = 'idle';
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('cancelBtn').style.display = 'none';
+            document.getElementById('abortBtn').style.display = 'none';
+            document.getElementById('pauseBtn').style.display = 'none';
+            document.getElementById('pauseBtn').textContent = 'PAUSE MISSION';
+        }
+
+        function onModeChange() {
+            const mode = document.getElementById('modeInput').value;
+            const target = document.getElementById('targetInput').value.trim();
+            const help = document.getElementById('dockerHelp');
+            if (help) {
+                const isLocal = target.includes('localhost') || target.includes('127.0.0.1');
+                help.style.display = isLocal ? 'block' : 'none';
+            }
+            const settingsInput = document.getElementById('settingsInput');
+            if ((mode === 'ai_agent' || mode === 'ai_chat') && !settingsInput.value.trim()) {
+                settingsInput.value = JSON.stringify({ prompt_field: 'prompt', response_field: 'response' });
+            }
+            updatePreview(mode, target);
+        }
+
+        function updatePreview(mode, target) {
+            const frame = document.getElementById('targetPreview');
+            if (!frame) return;
+            if (!target) {
+                frame.srcdoc = '<div style="font-family: sans-serif; color: #94a3b8; padding: 20px;">Enter a target to preview activity.</div>';
+                return;
+            }
+            if (mode === 'webapp') {
+                const url = target.startsWith('http://') || target.startsWith('https://') ? target : `http://${target}`;
+                frame.src = url;
+                return;
+            }
+            if (mode === 'ai_agent' || mode === 'ai_chat') {
+                frame.srcdoc = `<div style="font-family: sans-serif; color: #e2e8f0; padding: 20px;">
+                    <h3 style="margin:0 0 10px;">AI Agent Assessment</h3>
+                    <p style="margin:0 0 8px; color:#94a3b8;">Target endpoint:</p>
+                    <code>${escapeHtml(target)}</code>
+                    <p style="margin:16px 0 0; color:#94a3b8;">This mode evaluates LLM guardrails, prompt injection risks, and sensitive data leakage via autonomous probing.</p>
+                </div>`;
+                return;
+            }
+            frame.srcdoc = `<div style="font-family: sans-serif; color: #e2e8f0; padding: 20px;">
+                <h3 style="margin:0 0 10px;">${mode === 'system' ? 'System Assessment' : 'Legacy Autonomous Mode'}</h3>
+                <p style="margin:0 0 8px; color:#94a3b8;">Target:</p>
+                <code>${escapeHtml(target)}</code>
+                <p style="margin:16px 0 0; color:#94a3b8;">The LLM will perform a deep network-level reconnaissance and vulnerability analysis of this target.</p>
+            </div>`;
+        }
+
+        function pushReasoningThought(rawThought) {
+            const panel = document.getElementById('reasoningPanel');
+            if (!panel) return;
+            const empty = panel.querySelector('.empty-state');
+            if (empty) empty.remove();
+            const thought = document.createElement('div');
+            thought.className = 'thought-block';
+            const stamped = `[${new Date().toLocaleTimeString()}] ${(rawThought || '').toString()}`;
+            thought.innerHTML = escapeHtml(stamped).replace(/\n/g, '<br>');
+            panel.appendChild(thought);
+            panel.scrollTop = panel.scrollHeight;
         }
 
         // ── Initialization ──────────────────────────────────────────
@@ -1387,20 +1830,26 @@
             const runId = params.get('run_id');
             if (runId) {
                 try {
-                    const res = await fetch(`${API_BASE}/runs/${runId}`);
-                    if (res.ok) {
-                        const run = await res.json();
-                        initRun(run);
-                        connectWebSocket(runId);
+                    const res = await apiFetch(`/runs/${runId}`);
+                    const run = await res.json();
+                    if (!res.ok) {
+                        throw new Error((run && (run.detail || run.error)) || `HTTP ${res.status}`);
                     }
+                    if (!run || !run.id) {
+                        throw new Error('API returned no run id');
+                    }
+                    initRun(run);
+                    connectWebSocket(runId);
+                    startPolling();
                 } catch (e) {
-                    console.error('Failed to load run from URL', e);
+                    addEvent('error', 'Connection Failed', `Could not reach API: ${e.message}`);
                 }
             }
         });
 
         function resetDashboard() {
             eventCounter = 0;
+            browserActionCounter = 0;
             toolsRun.clear();
             findings.length = 0;
             document.getElementById('eventFeed').innerHTML = `
@@ -1412,9 +1861,10 @@
             document.getElementById('findingsBody').innerHTML = '';
             document.getElementById('findingsEmpty').style.display = '';
             document.getElementById('eventCount').textContent = '0';
+            document.getElementById('browserActionCount').textContent = '0';
             document.getElementById('findingsCount').textContent = '0';
             document.getElementById('toolOutput').textContent = 'Waiting for tool execution...';
-            document.getElementById('currentTool').textContent = '—';
+            document.getElementById('currentTool').textContent = '-';
             ['statTools', 'statFindings', 'statCriticalHigh']
                 .forEach(id => document.getElementById(id).textContent = '0');
             ['recon', 'enum', 'discovery', 'vuln', 'exploit', 'report'].forEach(p => {
@@ -1424,6 +1874,9 @@
             document.getElementById('runId').textContent = 'NOT CONNECTED';
             if (ws) { ws.close(); ws = null; }
             stopTimer();
+            document.getElementById('reasoningPanel').innerHTML = '<div class="empty-state" style="padding: 24px 8px;">Awaiting model reasoning...</div>';
+            document.getElementById('browserActionList').innerHTML = '<div class="empty-state" id="browserActionEmpty" style="padding: 16px 10px;">Waiting for browser telemetry...</div>';
+            resetButtons();
         }
 
         function escapeHtml(str) {
@@ -1443,19 +1896,20 @@
         // LLM Control
         async function fetchLLMStatus() {
             try {
-                const res = await fetch(`${API_BASE}/llm/status`);
+                const res = await apiFetch('/llm/status');
                 const status = await res.json();
                 const indicator = document.getElementById('aiIndicator');
                 const toggle = document.getElementById('llmToggle');
                 const modelSpan = document.getElementById('aiModel');
+                const providerLabel = status.provider ? `${status.provider.toUpperCase()} :: ` : '';
 
                 toggle.checked = status.enabled;
                 if (status.enabled && status.connected) {
                     indicator.className = 'status-dot-on';
-                    modelSpan.textContent = status.model;
+                    modelSpan.textContent = `${providerLabel}${status.model}`;
                 } else if (status.enabled && !status.connected) {
                     indicator.className = 'status-dot-off';
-                    modelSpan.textContent = 'OLLAMA OFFLINE';
+                    modelSpan.textContent = status.error || `${providerLabel}OFFLINE`;
                 } else {
                     indicator.className = 'status-dot-off';
                     modelSpan.textContent = 'NEURAL LINK DISABLED';
@@ -1468,7 +1922,7 @@
 
         async function toggleLLM() {
             try {
-                const res = await fetch(`${API_BASE}/llm/toggle`, { method: 'POST' });
+                const res = await apiFetch('/llm/toggle', { method: 'POST' });
                 const status = await res.json();
                 fetchLLMStatus(); // Refresh UI
             } catch (e) {
@@ -1478,7 +1932,7 @@
 
         async function fetchReports() {
             try {
-                const res = await fetch(`${API_BASE}/reports`);
+                const res = await apiFetch('/reports');
                 const data = await res.json();
                 const list = document.getElementById('reportList');
                 list.innerHTML = '';
@@ -1497,13 +1951,43 @@
                     const div = document.createElement('div');
                     div.className = 'report-item';
                     const date = new Date(rep.created_at).toLocaleDateString();
+                    const displayId = (rep.run_id || 'direct').toString();
+                    const shortId = displayId === 'direct' ? 'DIRECT' : displayId.slice(0, 8);
                     div.innerHTML = `
                         <div style="min-width: 0;">
                             <div style="font-size: 0.8rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rep.filename)}</div>
-                            <div style="font-size: 0.65rem; opacity: 0.5;">ID: ${rep.run_id.slice(0, 8)} • ${date}</div>
+                            <div style="font-size: 0.65rem; opacity: 0.5;">ID: ${shortId} • ${date}</div>
                         </div>
                         <a href="${rep.path}" target="_blank" class="report-link">OPEN ↗</a>
                     `;
+                    const link = div.querySelector('.report-link');
+                    if (link) {
+                        link.href = '#';
+                        link.addEventListener('click', async (event) => {
+                            event.preventDefault();
+                            try {
+                                await openReport(rep.path);
+                            } catch (e) {
+                                addEvent('error', 'Report Access Failed', e.message || 'Could not open report');
+                            }
+                        });
+                        if (rep.pdf_path) {
+                            const pdfLink = document.createElement('a');
+                            pdfLink.href = '#';
+                            pdfLink.className = 'report-link';
+                            pdfLink.textContent = 'PDF';
+                            pdfLink.addEventListener('click', async (event) => {
+                                event.preventDefault();
+                                try {
+                                    await downloadReport(rep.pdf_path, rep.filename.replace(/\.html?$/i, '.pdf'));
+                                } catch (e) {
+                                    addEvent('error', 'PDF Export Failed', e.message || 'Could not export PDF report');
+                                }
+                            });
+                            link.insertAdjacentText('afterend', ' ');
+                            link.insertAdjacentElement('afterend', pdfLink);
+                        }
+                    }
                     list.appendChild(div);
                 });
             } catch (e) {
@@ -1513,8 +1997,10 @@
 
         // Initial state and intervals
         document.addEventListener('DOMContentLoaded', () => {
+            restoreApiKey();
             fetchLLMStatus();
             fetchReports();
+            onModeChange();
             setInterval(fetchLLMStatus, 10000); // Poll AI health every 10s
             setInterval(fetchReports, 30000);   // Refresh report list every 30s
         });
@@ -1522,4 +2008,3 @@
 </body>
 
 </html>
-```

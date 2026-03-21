@@ -1,12 +1,14 @@
 import os
 import json
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Set
+from typing import Any, Dict, Set
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi import Depends
 from fastapi import Header
+from fastapi import Query
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -75,8 +77,10 @@ def require_api_key(x_api_key: str = Header(default="")):
 class CreateRunRequest(BaseModel):
     target: str = Field(..., description="Target hostname or IP")
     scope: str = Field(default="")
+    mode: str = Field(default="legacy", pattern="^(system|webapp|ai_agent|legacy)$")
     max_steps: int = Field(default=25, ge=1, le=500)
     policy_path: str = Field(default="policy.json")
+    settings: Dict[str, Any] = Field(default_factory=dict)
 
 class RegisterWordlistRequest(BaseModel):
     name: str = Field(..., min_length=1)
@@ -103,12 +107,24 @@ def health():
 @app.get("/llm/status")
 def get_llm_status():
     from llm_interface import LLMInterface
-    llm = LLMInterface()
-    llm.enabled = _llm_enabled
+    try:
+        llm = LLMInterface()
+        llm.enabled = _llm_enabled
+        connected = llm.check_connection() if _llm_enabled else False
+        model = llm.model
+        provider = getattr(llm, "provider", "unknown")
+        error = ""
+    except Exception as exc:
+        connected = False
+        model = ""
+        provider = os.getenv("KERAUNOS_LLM_PROVIDER", "unknown")
+        error = str(exc)
     return {
         "enabled": _llm_enabled,
-        "connected": llm.check_connection() if _llm_enabled else False,
-        "model": llm.model
+        "connected": connected,
+        "model": model,
+        "provider": provider,
+        "error": error,
     }
 
 @app.post("/llm/toggle")
@@ -120,20 +136,54 @@ def toggle_llm():
 # ── Reports ─────────────────────────────────────────────────────────
 @app.get("/reports")
 def list_reports(_: None = Depends(require_api_key)):
-    """List all reports across all runs."""
+    """List valid reports for completed/partial runs."""
     reports = []
-    runs_dir = Path("./data/runs")
-    if runs_dir.exists():
-        for run_path in runs_dir.iterdir():
-            if run_path.is_dir():
-                for report in run_path.glob("report_*.html"):
-                    reports.append({
-                        "run_id": run_path.name,
-                        "filename": report.name,
-                        "path": f"/runs/{run_path.name}/report",
-                        "created_at": datetime.fromtimestamp(report.stat().st_mtime, timezone.utc).isoformat()
-                    })
+    for run in run_manager.list_runs(limit=500):
+        if run.get("status") not in {"complete", "partial"}:
+            continue
+        report_path = run.get("report_path")
+        if not report_path:
+            continue
+        path_obj = Path(report_path)
+        if not path_obj.exists():
+            continue
+        reports.append({
+            "run_id": run["id"],
+            "filename": path_obj.name,
+            "path": f"/runs/{run['id']}/report",
+            "pdf_path": f"/runs/{run['id']}/report/pdf",
+            "created_at": datetime.fromtimestamp(path_obj.stat().st_mtime, timezone.utc).isoformat(),
+            "status": run.get("status", "complete"),
+        })
+
+    # Include legacy direct reports in ./data.
+    data_dir = Path("./data")
+    for report in data_dir.glob("report_*.html"):
+        if not any(r["filename"] == report.name for r in reports):
+            reports.append({
+                "run_id": "direct",
+                "filename": report.name,
+                "path": f"/data/{report.name}",
+                "created_at": datetime.fromtimestamp(report.stat().st_mtime, timezone.utc).isoformat(),
+                "status": "legacy",
+            })
     return {"items": sorted(reports, key=lambda x: x["created_at"], reverse=True)}
+
+
+@app.get("/data/{filename}")
+def get_direct_report(filename: str, _: None = Depends(require_api_key)):
+    # Only allow direct access to report files in ./data.
+    if Path(filename).name != filename or not filename.startswith("report_") or not filename.endswith(".html"):
+        raise HTTPException(status_code=400, detail="Invalid report filename")
+
+    base_dir = Path("./data").resolve()
+    path = (base_dir / filename).resolve()
+    if base_dir not in path.parents:
+        raise HTTPException(status_code=400, detail="Invalid report path")
+
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(path)
 
 # ── Runs ────────────────────────────────────────────────────────────
 @app.post("/runs")
@@ -141,10 +191,39 @@ def create_run(request: CreateRunRequest, _: None = Depends(require_api_key)):
     return run_manager.create_run(
         target=request.target,
         scope=request.scope,
+        mode=request.mode,
         max_steps=request.max_steps,
         policy_path=request.policy_path,
-        llm_enabled=_llm_enabled
+        llm_enabled=_llm_enabled,
+        settings=request.settings,
     )
+
+@app.get("/modes")
+def list_modes():
+    return {
+        "items": [
+            {
+                "id": "webapp",
+                "label": "Web App Assessment",
+                "description": "Deep LLM-driven testing for XSS, SQLi, SSRF, and web vulnerabilities.",
+            },
+            {
+                "id": "system",
+                "label": "System Assessment",
+                "description": "Deep LLM-driven testing for network protocols, services, and infrastructure.",
+            },
+            {
+                "id": "ai_agent",
+                "label": "AI Agent Assessment",
+                "description": "Deep LLM-driven testing for guardrails, prompt injection, and data leakage.",
+            },
+            {
+                "id": "legacy",
+                "label": "Legacy Autonomous Mode",
+                "description": "Standard discovery and enumeration orchestration.",
+            },
+        ]
+    }
 
 @app.get("/runs")
 def list_runs(limit: int = 50, _: None = Depends(require_api_key)):
@@ -164,9 +243,35 @@ def get_report(run_id: str, _: None = Depends(require_api_key)):
         raise HTTPException(status_code=404, detail="Report not found or run not completed")
     return FileResponse(report_path, media_type="text/html")
 
+@app.get("/runs/{run_id}/report/pdf")
+def get_report_pdf(run_id: str, _: None = Depends(require_api_key)):
+    run = run_manager.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    from data_store import DataStore
+    from reporting import ReportGenerator
+
+    pdf_path = ReportGenerator(DataStore(run["run_dir"])).generate(format="pdf")
+    return FileResponse(pdf_path, media_type="application/pdf", filename=Path(pdf_path).name)
+
 @app.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str, _: None = Depends(require_api_key)):
     run = run_manager.request_cancel(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+@app.post("/runs/{run_id}/pause")
+def pause_run(run_id: str, _: None = Depends(require_api_key)):
+    run = run_manager.request_pause(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+@app.post("/runs/{run_id}/resume")
+def resume_run(run_id: str, _: None = Depends(require_api_key)):
+    run = run_manager.request_resume(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
@@ -183,7 +288,14 @@ async def confirm_action_endpoint(run_id: str, body: ConfirmationResponse, _: No
 
 # ── WebSocket ───────────────────────────────────────────────────────
 @app.websocket("/ws/{run_id}")
-async def websocket_endpoint(websocket: WebSocket, run_id: str):
+async def websocket_endpoint(websocket: WebSocket, run_id: str, x_api_key: str = Query(default="")):
+    configured = os.getenv("KERAUNOS_API_KEY", "").strip()
+    if configured:
+        header_key = websocket.headers.get("x-api-key", "")
+        if header_key != configured and x_api_key != configured:
+            await websocket.close(code=1008)
+            return
+
     await ws_manager.connect(run_id, websocket)
     
     # Send initial state (history + findings) if available
@@ -197,6 +309,7 @@ async def websocket_endpoint(websocket: WebSocket, run_id: str):
                 "payload": {
                     "history": state.get("history", []),
                     "findings": state.get("findings", []),
+                    "reasoning_trace": state.get("reasoning_trace", []),
                     "status": run["status"]
                 }
             }))
@@ -209,9 +322,9 @@ async def websocket_endpoint(websocket: WebSocket, run_id: str):
             try:
                 await asyncio.wait_for(websocket.receive_text(), timeout=30)
             except asyncio.TimeoutError:
-                # Send ping to keep alive
+                # Send heartbeat to keep alive
                 try:
-                    await websocket.send_text(json.dumps({"stage": "ping"}))
+                    await websocket.send_text(json.dumps({"stage": "heartbeat"}))
                 except Exception:
                     break
     except WebSocketDisconnect:

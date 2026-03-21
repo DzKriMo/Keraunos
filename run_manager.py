@@ -7,9 +7,10 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from orchestrator import Orchestrator
+from mode_evaluator import ModeEvaluator
 
 
 class RunManager:
@@ -34,21 +35,34 @@ class RunManager:
         self._confirmation_events = confirmation_events
         self._confirmation_results = confirmation_results
 
-    def create_run(self, target: str, scope: str = "", max_steps: int = 25, policy_path: str = "policy.json", llm_enabled: bool = True) -> Dict:
+    def create_run(
+        self,
+        target: str,
+        scope: str = "",
+        max_steps: int = 25,
+        policy_path: str = "policy.json",
+        llm_enabled: bool = True,
+        mode: str = "legacy",
+        settings: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         run_id = uuid.uuid4().hex
         now = self._now()
         run_dir = self.runs_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         state_path = run_dir / "state.json"
+        settings_json = json.dumps(settings or {})
 
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO runs (
-                    id, target, scope, status, created_at, updated_at, max_steps, run_dir, state_path, policy_path, llm_enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, target, scope, status, created_at, updated_at, max_steps, run_dir, state_path, policy_path, llm_enabled, mode, settings_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, target, scope, "queued", now, now, max_steps, str(run_dir), str(state_path), policy_path, 1 if llm_enabled else 0),
+                (
+                    run_id, target, scope, "queued", now, now, max_steps, str(run_dir), str(state_path),
+                    policy_path, 1 if llm_enabled else 0, mode, settings_json
+                ),
             )
             conn.commit()
 
@@ -83,12 +97,51 @@ class RunManager:
         self._update_run(run_id, cancel_requested=1, updated_at=self._now(), last_event="cancel_requested")
         return self.get_run(run_id)
 
+    def request_pause(self, run_id: str) -> Optional[Dict]:
+        run = self.get_run(run_id)
+        if not run:
+            return None
+        if run["status"] in {"complete", "failed", "cancelled", "partial"}:
+            return run
+        self._update_run(
+            run_id,
+            pause_requested=1,
+            status="paused",
+            updated_at=self._now(),
+            last_event="pause_requested",
+        )
+        self._broadcast(run_id, "paused", {"reason": "user_requested"})
+        return self.get_run(run_id)
+
+    def request_resume(self, run_id: str) -> Optional[Dict]:
+        run = self.get_run(run_id)
+        if not run:
+            return None
+        if run["status"] in {"complete", "failed", "cancelled", "partial"}:
+            return run
+        self._update_run(
+            run_id,
+            pause_requested=0,
+            status="running",
+            updated_at=self._now(),
+            last_event="resume_requested",
+        )
+        self._broadcast(run_id, "resumed", {"reason": "user_requested"})
+        return self.get_run(run_id)
+
     def _execute_run(self, run_id: str):
         run = self.get_run(run_id)
         if not run:
             return
 
-        self._update_run(run_id, status="running", updated_at=self._now(), last_event="run_started")
+        self._update_run(
+            run_id,
+            status="running",
+            updated_at=self._now(),
+            last_event="run_started",
+            cancel_requested=0,
+            pause_requested=0,
+        )
 
         def progress_callback(stage: str, payload: Dict):
             self._update_run(
@@ -108,9 +161,9 @@ class RunManager:
             """Request confirmation from the dashboard via WebSocket."""
             confirm_id = uuid.uuid4().hex
 
-            if not self._event_loop or not self._confirmation_events:
-                # No dashboard connected — fallback to auto-approve
-                return True
+            if self._event_loop is None or self._confirmation_events is None:
+                # No dashboard connected: fail closed.
+                return False
 
             # Create an asyncio Event for this confirmation
             event = asyncio.Event()
@@ -139,6 +192,9 @@ class RunManager:
             return approved
 
         try:
+            mode = run.get("mode", "legacy")
+            # All modes (system, webapp, ai_agent, legacy) now use the LLM Orchestrator
+            # with mode-specific specialization in the system prompt.
             orchestrator = Orchestrator(
                 run["target"],
                 run["scope"],
@@ -148,11 +204,18 @@ class RunManager:
                 policy_path=run["policy_path"],
                 progress_callback=progress_callback,
                 should_stop_callback=lambda: self._is_cancel_requested(run_id),
+                should_pause_callback=lambda: self._is_pause_requested(run_id),
                 confirm_callback=dashboard_confirm,
-                llm_enabled=bool(run.get("llm_enabled", 1))
+                llm_enabled=bool(run.get("llm_enabled", 1)),
+                mode=mode,
+                settings=run.get("settings_json") or {},
             )
             result = orchestrator.run()
             report_path = self._find_report_path(run["run_dir"])
+            
+            # Legacy check for the state path if not handled by orchestrator
+            if not report_path:
+                status = result.get("status", "complete")
             status = result.get("status", "complete")
             if status == "cancelled":
                 self._update_run(
@@ -165,12 +228,14 @@ class RunManager:
                 )
                 self._broadcast(run_id, "cancelled", {"reason": "stop_requested"})
                 return
+            final_status = "complete" if status == "completed" else status
             self._update_run(
                 run_id,
-                status=status,
+                status=final_status,
                 updated_at=self._now(),
                 report_path=report_path,
                 error_message="",
+                pause_requested=0,
             )
             self._broadcast(run_id, "completed", {"steps": result.get("steps", 0)})
         except Exception as exc:
@@ -213,10 +278,14 @@ class RunManager:
             pass
 
     def _find_report_path(self, run_dir: str) -> Optional[str]:
-        candidates = list(Path(run_dir).glob("report_*.html"))
-        if not candidates:
-            return None
-        return str(candidates[0])
+        candidates = sorted(
+            Path(run_dir).glob("report_*.html"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return str(candidates[0])
+        return None
 
     def _update_run(self, run_id: str, **fields):
         if not fields:
@@ -249,7 +318,10 @@ class RunManager:
                     last_event_payload TEXT DEFAULT '',
                     cancel_requested INTEGER DEFAULT 0,
                     cancelled_at TEXT DEFAULT '',
-                    llm_enabled INTEGER DEFAULT 1
+                    pause_requested INTEGER DEFAULT 0,
+                    llm_enabled INTEGER DEFAULT 1,
+                    mode TEXT DEFAULT 'legacy',
+                    settings_json TEXT DEFAULT '{}'
                 )
                 """
             )
@@ -261,8 +333,14 @@ class RunManager:
                 conn.execute("ALTER TABLE runs ADD COLUMN cancel_requested INTEGER DEFAULT 0")
             if "cancelled_at" not in existing_cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN cancelled_at TEXT DEFAULT ''")
+            if "pause_requested" not in existing_cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN pause_requested INTEGER DEFAULT 0")
             if "llm_enabled" not in existing_cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN llm_enabled INTEGER DEFAULT 1")
+            if "mode" not in existing_cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN mode TEXT DEFAULT 'legacy'")
+            if "settings_json" not in existing_cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN settings_json TEXT DEFAULT '{}'")
             conn.commit()
 
     def _connect(self):
@@ -289,7 +367,10 @@ class RunManager:
             "last_event_payload",
             "cancel_requested",
             "cancelled_at",
+            "pause_requested",
             "llm_enabled",
+            "mode",
+            "settings_json",
         ]
         item = dict(zip(columns, row))
         payload = item.get("last_event_payload")
@@ -298,6 +379,12 @@ class RunManager:
                 item["last_event_payload"] = json.loads(payload)
             except json.JSONDecodeError:
                 pass
+        settings_json = item.get("settings_json")
+        if settings_json:
+            try:
+                item["settings_json"] = json.loads(settings_json)
+            except json.JSONDecodeError:
+                item["settings_json"] = {}
         return item
 
     def _now(self):
@@ -308,3 +395,9 @@ class RunManager:
         if not run:
             return False
         return bool(run.get("cancel_requested", 0))
+
+    def _is_pause_requested(self, run_id: str) -> bool:
+        run = self.get_run(run_id)
+        if not run:
+            return False
+        return bool(run.get("pause_requested", 0))

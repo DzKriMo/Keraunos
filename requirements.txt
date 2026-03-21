@@ -8,3 +8,7 @@ pytest
 pymetasploit3  # Metasploit RPC client
 websockets
 # For XML parsing: lxml (if needed)
+pydantic
+tenacity
+tiktoken  # for accurate token counting
+playwright

@@ -130,3 +130,109 @@ def test_dedupe():
     ]
     findings = engine.derive_findings(history)
     assert len(findings) == 1
+
+
+def test_web_interact_cookie_and_screenshot_noise():
+    engine = AnalysisEngine()
+    history = [
+        {
+            "tool": "web_interact",
+            "params": {"path": "/login"},
+            "result": {
+                "full_url": "http://localhost:3000/login",
+                "status_code": 200,
+                "headers": {"Set-Cookie": "connect.sid=abc123; Path=/"},
+                "response_preview": "<html>ok</html>",
+                "browser_screenshot": "data/runs/x/browser.png",
+            },
+        },
+        {
+            "tool": "web_interact",
+            "params": {"path": "/login"},
+            "result": {
+                "full_url": "http://localhost:3000/login",
+                "status_code": 200,
+                "headers": {"Set-Cookie": "connect.sid=def456; Path=/"},
+                "response_preview": "<html>ok</html>",
+                "browser_screenshot": "data/runs/x/browser2.png",
+            },
+        },
+    ]
+    findings = engine.derive_findings(history)
+    assert len(findings) == 1
+    assert findings[0]["name"] == "Session cookie missing HttpOnly"
+    assert "connect.sid" in findings[0]["evidence"]
+
+
+def test_web_interact_detects_csrf_and_ssti():
+    engine = AnalysisEngine()
+    history = [
+        {
+            "tool": "web_interact",
+            "params": {"path": "/csrf-demo"},
+            "result": {
+                "full_url": "http://localhost:3000/csrf-demo",
+                "status_code": 200,
+                "headers": {},
+                "response_preview": "<form action='/csrf-demo/update-email' method='POST'><input name='email'></form>",
+            },
+        },
+        {
+            "tool": "web_interact",
+            "params": {"path": "/template-lab", "payload": {"name": "{{7*7}}"}},
+            "result": {
+                "full_url": "http://localhost:3000/template-lab?name=%7B%7B7*7%7D%7D",
+                "status_code": 200,
+                "headers": {},
+                "response_preview": "Rendered output: 49",
+            },
+        },
+    ]
+    findings = engine.derive_findings(history)
+    names = {finding["name"] for finding in findings}
+    assert "Potential missing CSRF protection" in names
+    assert "Potential server-side template injection" in names
+
+
+def test_web_interact_ssrf_is_path_aware():
+    engine = AnalysisEngine()
+    history = [
+        {
+            "tool": "web_interact",
+            "params": {"path": "/", "payload": {}},
+            "result": {
+                "full_url": "http://localhost:3000/",
+                "status_code": 200,
+                "headers": {},
+                "response_preview": "Welcome to Olympus. Visit the Oracle and the Archives.",
+            },
+        },
+        {
+            "tool": "web_interact",
+            "params": {"path": "/fetch", "payload": {"url": "http://oracle:4000/metadata"}},
+            "result": {
+                "full_url": "http://localhost:3000/fetch?url=http%3A%2F%2Foracle%3A4000%2Fmetadata",
+                "status_code": 200,
+                "headers": {},
+                "response_preview": "oracle metadata instance-id i-12345",
+            },
+        },
+    ]
+    findings = engine.derive_findings(history)
+    ssrf = [finding for finding in findings if finding["name"] == "Potential SSRF to internal service"]
+    assert len(ssrf) == 1
+    assert "/fetch" in ssrf[0]["evidence"]
+
+
+def test_findings_include_confidence_and_category():
+    engine = AnalysisEngine()
+    history = [
+        {
+            "tool": "sqlmap",
+            "params": {"url": "http://localhost:3000/search?q=test"},
+            "result": {"vulnerable": True, "banner": "sqlite"},
+        }
+    ]
+    findings = engine.derive_findings(history)
+    assert findings[0]["confidence"] >= 0.9
+    assert findings[0]["category"] == "Injection"

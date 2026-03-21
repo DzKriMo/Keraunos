@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 
 class AnalysisEngine:
@@ -15,7 +16,8 @@ class AnalysisEngine:
             params = event.get("params", {})
             handler = self._handlers.get(tool)
             if handler:
-                findings.extend(handler(self, params, result))
+                derived = handler(self, params, result)
+                findings.extend(self._normalize_findings(derived, tool, params, result))
         return self._dedupe(findings)
 
     # ------------------------------------------------------------------ #
@@ -106,6 +108,161 @@ class AnalysisEngine:
                 "remediation": "Remove or obfuscate framework-identifying response headers.",
             })
         return findings
+
+    # ------------------------------------------------------------------ #
+    # Web Interact
+    # ------------------------------------------------------------------ #
+    def _from_web_interact(self, params: Dict, result: Dict) -> List[Dict]:
+        findings = []
+        body = str(result.get("response_preview", "") or "").lower()
+        final_url = str(result.get("full_url") or result.get("url") or "")
+        status = int(result.get("status_code", 0) or 0)
+        headers = {str(k).lower(): str(v) for k, v in (result.get("headers") or {}).items()}
+        payload = params.get("payload") or {}
+        parsed_url = urlparse(final_url) if final_url else None
+        path = parsed_url.path if parsed_url else ""
+        cookie_header = headers.get("set-cookie", "")
+        payload_text = " ".join(str(value) for value in payload.values()).lower()
+
+        if cookie_header and "httponly" not in cookie_header.lower():
+            cookie_name = cookie_header.split("=", 1)[0].strip() or "session"
+            findings.append({
+                "name": "Session cookie missing HttpOnly",
+                "severity": "Medium",
+                "description": "A browser-facing response set a cookie without the HttpOnly attribute.",
+                "affected_resource": final_url or path or "/",
+                "evidence": f"{cookie_name} cookie set by {final_url or '/'} without HttpOnly.",
+                "remediation": "Set HttpOnly on session cookies to reduce XSS impact.",
+                "fingerprint": f"cookie_httponly:{cookie_name}",
+            })
+        sql_error_tokens = ["sql syntax", "unterminated", "near \"union\"", "database error", "sqlite error", "mysql error"]
+        if any(token in body for token in sql_error_tokens) and (
+            path.startswith("/search")
+            or any(marker in payload_text for marker in ["union", "select", " or ", "'--", "\"--", "1=1"])
+        ):
+            findings.append({
+                "name": "Potential SQL injection indicator",
+                "severity": "High",
+                "description": "Application response included SQL error-style content after crafted input.",
+                "evidence": f"{final_url} returned SQL-like error text.",
+                "remediation": "Use parameterized queries and normalize error handling.",
+                "affected_resource": final_url,
+                "fingerprint": f"sqli_indicator:{path or final_url}",
+            })
+        if "/account" in final_url and status == 200:
+            id_value = params.get("payload", {}).get("id") or ""
+            if any(token in body for token in ["email", "username", "account"]) and id_value:
+                findings.append({
+                    "name": "Potential IDOR on account endpoint",
+                    "severity": "High",
+                    "description": "Direct object reference appears to expose account data by identifier.",
+                    "evidence": f"{final_url} returned account-like data for id={id_value}.",
+                    "remediation": "Enforce per-object authorization on account lookups.",
+                    "affected_resource": final_url,
+                    "fingerprint": f"idor_account:{path or final_url}",
+                })
+        if any(token in body for token in ["root:x:", "module.exports", "express()", "const app"]) or "../" in final_url:
+            findings.append({
+                "name": "Potential arbitrary file read",
+                "severity": "High",
+                "description": "Response content suggests local file disclosure through path traversal or direct file read.",
+                "evidence": final_url,
+                "remediation": "Restrict file access to an allowlist and normalize paths before use.",
+                "affected_resource": final_url,
+                "fingerprint": f"file_read:{path or final_url}",
+            })
+        target_url = str(payload.get("url") or payload.get("uri") or "").lower()
+        internal_targets = ["internal-api", "ops-console", "internal-files", "oracle", "archives", "forge", "127.0.0.1", "localhost", "169.254.", "metadata"]
+        fetched_internal = path.startswith("/fetch") and target_url and any(host in target_url for host in internal_targets)
+        internal_content = any(marker in body for marker in ["oracle", "archives", "forge", "metadata", "instance-id", "internal service"])
+        if fetched_internal and internal_content:
+            findings.append({
+                "name": "Potential SSRF to internal service",
+                "severity": "High",
+                "description": "The application appears able to fetch internal-only service content.",
+                "evidence": f"{final_url} fetched {target_url}.",
+                "remediation": "Block server-side requests to internal networks and sensitive schemes.",
+                "affected_resource": final_url,
+                "fingerprint": f"ssrf:{path or final_url}",
+            })
+        if any(marker in body for marker in ["uid=", "gid=", "root\n", "diagnostics"]) and "/diagnostics" in final_url:
+            findings.append({
+                "name": "Potential command injection",
+                "severity": "Critical",
+                "description": "Diagnostics output suggests operating system command execution.",
+                "evidence": f"{final_url} returned command-execution style output.",
+                "remediation": "Remove shell invocation and use strict command allowlists.",
+                "affected_resource": final_url,
+                "fingerprint": f"command_injection:{path or final_url}",
+            })
+        if any(marker in body for marker in ["<script", "onerror=", "alert("]) and "/board" in final_url:
+            findings.append({
+                "name": "Potential stored XSS",
+                "severity": "High",
+                "description": "Board content reflects active script-like payloads.",
+                "evidence": final_url,
+                "remediation": "Escape untrusted HTML and enable contextual output encoding.",
+                "affected_resource": final_url,
+                "fingerprint": f"stored_xss:{path or final_url}",
+            })
+        if "/api/token" in final_url and any(token in body for token in ['"alg":"none"', '"alg": "none"', "unsigned", "bearer"]):
+            findings.append({
+                "name": "Potential unsigned bearer token",
+                "severity": "High",
+                "description": "Token issuance appears to permit unsigned or weakly validated bearer tokens.",
+                "evidence": final_url,
+                "remediation": "Require signed tokens with strict verification of algorithm, issuer, and audience.",
+                "affected_resource": final_url,
+                "fingerprint": f"unsigned_token:{path or final_url}",
+            })
+        if "/template" in final_url and any(marker in body for marker in ["49", "jinja", "template error", "rendered", "{{7*7}}"]):
+            findings.append({
+                "name": "Potential server-side template injection",
+                "severity": "High",
+                "description": "Template-like input appears to be evaluated on the server.",
+                "evidence": final_url,
+                "remediation": "Avoid rendering untrusted template syntax and isolate template context from user input.",
+                "affected_resource": final_url,
+                "fingerprint": f"ssti:{path or final_url}",
+            })
+        if "/import" in final_url and any(marker in body for marker in ["pickle", "deserialize", "deserializ", "__reduce__", "object restored"]):
+            findings.append({
+                "name": "Potential unsafe deserialization",
+                "severity": "Critical",
+                "description": "Import functionality appears to deserialize attacker-controlled content.",
+                "evidence": final_url,
+                "remediation": "Replace unsafe object deserialization with strict schema validation and safe parsers.",
+                "affected_resource": final_url,
+                "fingerprint": f"deserialization:{path or final_url}",
+            })
+        if "/csrf" in final_url and "<form" in body and not any(token in body for token in ["_csrf", "csrf_token", "csrfmiddlewaretoken"]):
+            findings.append({
+                "name": "Potential missing CSRF protection",
+                "severity": "Medium",
+                "description": "A state-changing workflow appears to be exposed without an anti-CSRF token.",
+                "evidence": final_url,
+                "remediation": "Require anti-CSRF tokens and same-site cookie protections for state-changing actions.",
+                "affected_resource": final_url,
+                "fingerprint": f"csrf:{path or final_url}",
+            })
+        return findings
+
+    # ------------------------------------------------------------------ #
+    # WebSocket Interact
+    # ------------------------------------------------------------------ #
+    def _from_websocket_interact(self, params: Dict, result: Dict) -> List[Dict]:
+        received = " ".join(str(item) for item in result.get("messages_received", []))
+        if not received:
+            return []
+        if any(token in received.lower() for token in ["admin", "secret", "banner", "token", "maintenance"]):
+            return [{
+                "name": "Potential weak WebSocket authorization",
+                "severity": "High",
+                "description": "WebSocket interaction returned privileged or sensitive content after direct connection.",
+                "evidence": received[:300],
+                "remediation": "Apply server-side session authorization to WebSocket connection setup and actions.",
+            }]
+        return []
 
     # ------------------------------------------------------------------ #
     # WPScan
@@ -443,12 +600,99 @@ class AnalysisEngine:
         seen = set()
         unique = []
         for finding in findings:
-            key = (finding.get("name"), finding.get("evidence"))
+            key = finding.get("fingerprint") or (finding.get("name"), finding.get("evidence"))
             if key in seen:
                 continue
             seen.add(key)
             unique.append(finding)
         return unique
+
+    def _normalize_findings(self, findings: List[Dict[str, Any]], tool: str, params: Dict[str, Any], result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        normalized = []
+        for finding in findings:
+            item = dict(finding)
+            item.setdefault("source_tool", tool)
+            item.setdefault("category", self._infer_category(item, params))
+            item.setdefault("confidence", self._infer_confidence(item, tool, params, result))
+            item["confidence"] = max(0.05, min(float(item["confidence"]), 0.99))
+            normalized.append(item)
+        return normalized
+
+    def _infer_category(self, finding: Dict[str, Any], params: Dict[str, Any]) -> str:
+        name = str(finding.get("name", "")).lower()
+        affected = str(finding.get("affected_resource", "")).lower()
+        evidence = str(finding.get("evidence", "")).lower()
+        text = " ".join([name, affected, evidence])
+        if "sql" in text:
+            return "Injection"
+        if "xss" in text:
+            return "Injection"
+        if "template" in text:
+            return "Injection"
+        if "command" in text:
+            return "RCE"
+        if "deserialization" in text:
+            return "RCE"
+        if "idor" in text or "/account" in text:
+            return "Authorization"
+        if "token" in text or "jwt" in text or "bearer" in text:
+            return "Authentication"
+        if "csrf" in text:
+            return "Session"
+        if "cookie" in text:
+            return "Session"
+        if "websocket" in text or "/ws" in text:
+            return "Realtime"
+        if "ssrf" in text or "/fetch" in text:
+            return "Server-Side Request"
+        if "file" in text or "download" in text:
+            return "File Access"
+        if "tls" in text or "ssl" in text or "http " in text:
+            return "Transport"
+        if "port" in text or "service" in text:
+            return "Exposure"
+        return "General"
+
+    def _infer_confidence(self, finding: Dict[str, Any], tool: str, params: Dict[str, Any], result: Dict[str, Any]) -> float:
+        name = str(finding.get("name", "")).lower()
+        evidence = str(finding.get("evidence", "")).lower()
+        severity = str(finding.get("severity", "Low"))
+
+        if tool == "sqlmap" and result.get("vulnerable"):
+            return 0.95
+        if tool == "nuclei":
+            return 0.93
+        if tool == "websocket_interact" and result.get("messages_received"):
+            return 0.82
+        if "command injection" in name:
+            return 0.94
+        if "arbitrary file read" in name:
+            return 0.91
+        if "unsigned bearer token" in name:
+            return 0.84
+        if "sql injection indicator" in name:
+            return 0.72
+        if "possible sql injection" in name:
+            return 0.9
+        if "idor" in name:
+            return 0.83
+        if "stored xss" in name:
+            return 0.78
+        if "server-side template injection" in name:
+            return 0.76
+        if "unsafe deserialization" in name:
+            return 0.74
+        if "ssrf" in name:
+            return 0.81
+        if "csrf" in name:
+            return 0.65
+        if "httponly" in name:
+            return 0.86
+        if "exposed service" in name:
+            return 0.68 if severity == "High" else 0.58
+        if "header disclosure" in name:
+            return 0.88
+        return 0.7 if severity in {"Critical", "High"} else 0.6
 
 
 # ------------------------------------------------------------------ #
@@ -458,6 +702,8 @@ AnalysisEngine._handlers = {
     "nmap": AnalysisEngine._from_nmap,
     "sqlmap": AnalysisEngine._from_sqlmap,
     "http_probe": AnalysisEngine._from_http_probe,
+    "web_interact": AnalysisEngine._from_web_interact,
+    "websocket_interact": AnalysisEngine._from_websocket_interact,
     "wpscan": AnalysisEngine._from_wpscan,
     "searchsploit": AnalysisEngine._from_searchsploit,
     "metasploit_search": AnalysisEngine._from_metasploit_search,

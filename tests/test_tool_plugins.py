@@ -33,6 +33,8 @@ def test_plugin_discovery_includes_extra_tools():
     assert "ffuf" in tools
     assert "sslscan" in tools
     assert "dns_enum" in tools
+    assert "web_interact" in tools
+    assert "websocket_interact" in tools
 
 
 def test_all_tools_have_risk_level():

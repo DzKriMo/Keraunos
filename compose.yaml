@@ -1,0 +1,23 @@
+services:
+  keraunos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: keraunos
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      KERAUNOS_LLM_PROVIDER: ${KERAUNOS_LLM_PROVIDER:-openrouter}
+      KERAUNOS_LLM_MODEL: ${KERAUNOS_LLM_MODEL:-stepfun/step-3.5-flash:free}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:}
+      OPENROUTER_HTTP_REFERER: ${OPENROUTER_HTTP_REFERER:-http://localhost:8000}
+      OPENROUTER_X_TITLE: ${OPENROUTER_X_TITLE:-Keraunos}
+      KERAUNOS_API_KEY: ${KERAUNOS_API_KEY:-change-me}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "1gb"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

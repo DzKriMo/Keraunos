@@ -17,7 +17,8 @@
     "msf_session": 120,
     "enum4linux": 300,
     "sslscan": 120,
-    "dns_enum": 180
+    "dns_enum": 180,
+    "web_interact": 120
   },
   "allowed_tools": [
     "nmap",
@@ -38,7 +39,8 @@
     "msf_exploit",
     "msf_payload",
     "msf_session",
-    "hydra"
+    "hydra",
+    "web_interact"
   ],
   "blocked_tools_require_unlock": [],
   "blocked_flags": {

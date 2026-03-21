@@ -1,6 +1,6 @@
 # Keraunos
 
-Autonomous, policy-controlled pentesting orchestration service with async runs, plugin-based tools, deterministic findings extraction, and report generation.
+Policy-controlled assessment service with async runs, live dashboarding, deterministic findings extraction, and report generation.
 
 ## Features
 
@@ -12,6 +12,9 @@ Autonomous, policy-controlled pentesting orchestration service with async runs, 
 - Deterministic findings extraction from tool outputs
 - HTML report generation per run
 - Optional API key authentication
+- Safe evaluation modes for `system`, `webapp`, and `ai_agent`
+- Live dashboard target preview, browser telemetry, and run-mode controls
+- OpenRouter support with OpenAI-compatible model backends
 
 ## Architecture
 
@@ -30,6 +33,7 @@ Autonomous, policy-controlled pentesting orchestration service with async runs, 
 
 ```bash
 pip install -r requirements.txt
+playwright install chromium
 ```
 
 2. Start API:
@@ -43,7 +47,7 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 ```bash
 curl -X POST http://localhost:8000/runs \
   -H "Content-Type: application/json" \
-  -d "{\"target\":\"scanme.nmap.org\",\"scope\":\"\",\"max_steps\":8}"
+  -d "{\"target\":\"http://localhost:3000\",\"scope\":\"\",\"mode\":\"webapp\",\"max_steps\":8}"
 ```
 
 4. Check run:
@@ -112,6 +116,35 @@ Then include:
 X-API-Key: change-me
 ```
 
+## LLM Provider Configuration
+
+Keraunos now supports both local Ollama and OpenRouter.
+
+OpenRouter example:
+
+```bash
+export KERAUNOS_LLM_PROVIDER=openrouter
+export KERAUNOS_LLM_MODEL=stepfun/step-3.5-flash:free
+export OPENROUTER_API_KEY=your-key
+```
+
+Role-specific overrides are also supported:
+
+```bash
+export KERAUNOS_PLANNER_LLM_PROVIDER=ollama
+export KERAUNOS_PLANNER_LLM_MODEL=deepseek-r1:8b
+export KERAUNOS_REPORT_LLM_PROVIDER=openrouter
+export KERAUNOS_REPORT_LLM_MODEL=stepfun/step-3.5-flash:free
+```
+
+Ollama example:
+
+```bash
+export KERAUNOS_LLM_PROVIDER=ollama
+export KERAUNOS_LLM_MODEL=deepseek-r1:8b
+export KERAUNOS_LLM_URL=http://localhost:11434
+```
+
 ## Policy Controls
 
 Edit `policy.json`:
@@ -162,15 +195,62 @@ Plugins are auto-discovered at runtime.
 
 ## Safety Boundary
 
-This repository currently supports **passive/assessment-oriented** workflows.  
-Exploit execution automation and brute-force wordlist attack setup are intentionally not included by default.
+This repository should be used for **defensive, authorized assessment workflows**.
+
+Recommended modes:
+
+- `system`: safe host review with allowlisted port and TLS checks
+- `webapp`: safe route, header, cookie, and form review
+- `webapp`: browser-assisted route, auth, file upload, WebSocket, and payload testing
+- `ai_agent`: autonomous evaluation of LLM guardrails, prompt injection, and data leakage
+
+The legacy orchestration path is still available for compatibility, but new dashboard controls default to the safer mode-based workflow.
 
 ## Docker
 
+Keraunos now ships with a container build that includes the Python app, Kali tooling, Playwright, and Chromium for browser-driven web testing.
+
+1. Create a local env file:
+
+```bash
+cp .env.example .env
+```
+
+2. Set at least:
+
+```bash
+OPENROUTER_API_KEY=your-key
+KERAUNOS_LLM_PROVIDER=openrouter
+KERAUNOS_LLM_MODEL=stepfun/step-3.5-flash:free
+```
+
+3. Start the stack:
+
+```bash
+docker compose up --build
+```
+
+4. Open:
+
+```text
+http://localhost:8000
+```
+
+The compose file persists run data under `./data`, publishes port `8000`, sets `host.docker.internal`, and gives Chromium extra shared memory for Playwright sessions.
+
+If you prefer raw `docker run`, build and start it like this:
+
 ```bash
 docker build -t keraunos .
-docker run --rm -p 8000:8000 keraunos
+docker run --rm -p 8000:8000 \
+  --add-host=host.docker.internal:host-gateway \
+  --shm-size=1g \
+  --env-file .env \
+  -v "$(pwd)/data:/app/data" \
+  keraunos
 ```
+
+`host.docker.internal` is still required when the target app is running on your host machine.
 
 ## Testing
 
