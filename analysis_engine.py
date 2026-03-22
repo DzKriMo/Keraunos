@@ -135,10 +135,12 @@ class AnalysisEngine:
                 "remediation": "Set HttpOnly on session cookies to reduce XSS impact.",
                 "fingerprint": f"cookie_httponly:{cookie_name}",
             })
-        sql_error_tokens = ["sql syntax", "unterminated", "near \"union\"", "database error", "sqlite error", "mysql error"]
+        sql_error_tokens = ["sql syntax", "unterminated", "near \"union\"", "database error", "sqlite error", "mysql error", "postgresql", "odbc", "sqlstate"]
+        search_like_path = any(token in path.lower() for token in ["/search", "/find", "/query", "/lookup"])
+        injection_payload = any(marker in payload_text for marker in ["union", "select", " or ", "'--", "\"--", "1=1", "sleep(", "benchmark("])
         if any(token in body for token in sql_error_tokens) and (
-            path.startswith("/search")
-            or any(marker in payload_text for marker in ["union", "select", " or ", "'--", "\"--", "1=1"])
+            search_like_path
+            or injection_payload
         ):
             findings.append({
                 "name": "Potential SQL injection indicator",
@@ -149,8 +151,14 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"sqli_indicator:{path or final_url}",
             })
-        if path.startswith("/search") and any(marker in payload_text for marker in ["' or '1'='1", "\" or \"1\"=\"1", "union", "1=1"]):
-            if any(marker in body for marker in ["platform administrator", "security analyst", "temporary guest account", "<strong>admin</strong>", "<strong>analyst</strong>", "<strong>guest</strong>"]):
+        result_set_markers = [
+            "<table", "<tr", "<td", "\"items\":", "\"results\":", "\"rows\":", "\"data\":", "records found", "showing results", "result count"
+        ]
+        identity_markers = [
+            "email", "username", "user_id", "full_name", "first_name", "last_name", "account", "profile", "customer", "order"
+        ]
+        if search_like_path and any(marker in payload_text for marker in ["' or '1'='1", "\" or \"1\"=\"1", "union", "1=1", "' or 1=1", "\" or 1=1"]):
+            if any(marker in body for marker in result_set_markers) and any(marker in body for marker in identity_markers):
                 findings.append({
                     "name": "Potential SQL injection indicator",
                     "severity": "High",
@@ -160,18 +168,30 @@ class AnalysisEngine:
                     "affected_resource": final_url,
                     "fingerprint": f"sqli_indicator:{path or final_url}",
                 })
-        if "/account" in final_url and status == 200:
-            id_value = params.get("payload", {}).get("id") or ""
-            if any(token in body for token in ["email", "username", "account", "internal note", "authorization is not enforced"]) and id_value:
+        object_like_path = any(token in path.lower() for token in ["/account", "/profile", "/user", "/member", "/customer", "/order", "/invoice"])
+        id_value = params.get("payload", {}).get("id") or params.get("payload", {}).get("user_id") or ""
+        if object_like_path and status == 200:
+            if any(token in body for token in ["email", "username", "account", "profile", "customer", "order", "invoice", "user id", "member"]) and id_value:
                 findings.append({
-                    "name": "Potential IDOR on account endpoint",
+                    "name": "Potential IDOR on object endpoint",
                     "severity": "High",
                     "description": "Direct object reference appears to expose account data by identifier.",
                     "evidence": f"{final_url} returned account-like data for id={id_value}.",
                     "remediation": "Enforce per-object authorization on account lookups.",
                     "affected_resource": final_url,
-                    "fingerprint": f"idor_account:{path or final_url}",
+                    "fingerprint": f"idor_object:{path or final_url}",
                 })
+        explicit_authz_failure = any(marker in body for marker in ["authorization is not enforced", "access control missing", "no authorization", "insecure direct object reference"])
+        if explicit_authz_failure:
+            findings.append({
+                "name": "Potential IDOR on object endpoint",
+                "severity": "High",
+                "description": "Response content indicates missing authorization checks on object access.",
+                "evidence": final_url,
+                "remediation": "Enforce per-object authorization on object lookups.",
+                "affected_resource": final_url,
+                "fingerprint": f"idor_object:{path or final_url}",
+            })
         if any(token in body for token in ["root:x:", "module.exports", "express()", "const app"]) or "../" in final_url:
             findings.append({
                 "name": "Potential arbitrary file read",
@@ -183,9 +203,10 @@ class AnalysisEngine:
                 "fingerprint": f"file_read:{path or final_url}",
             })
         target_url = str(payload.get("url") or payload.get("uri") or "").lower()
-        internal_targets = ["internal-api", "ops-console", "internal-files", "oracle", "archives", "forge", "127.0.0.1", "localhost", "169.254.", "metadata"]
-        fetched_internal = path.startswith("/fetch") and target_url and any(host in target_url for host in internal_targets)
-        internal_content = any(marker in body for marker in ["oracle", "archives", "forge", "metadata", "instance-id", "internal service"])
+        internal_targets = ["127.0.0.1", "localhost", "169.254.", "metadata", "internal", ".local", ".internal", "0.0.0.0"]
+        ssrf_like_path = any(token in path.lower() for token in ["/fetch", "/proxy", "/url", "/webhook", "/import", "/crawl"])
+        fetched_internal = ssrf_like_path and target_url and any(host in target_url for host in internal_targets)
+        internal_content = any(marker in body for marker in ["metadata", "instance-id", "internal service", "localhost", "127.0.0.1", "ami-id", "hostname"])
         if fetched_internal and internal_content:
             findings.append({
                 "name": "Potential SSRF to internal service",
@@ -196,7 +217,9 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"ssrf:{path or final_url}",
             })
-        if any(marker in body for marker in ["uid=", "gid=", "root\n", "diagnostics"]) and "/diagnostics" in final_url:
+        command_like_path = any(token in path.lower() for token in ["/diagnostic", "/debug", "/exec", "/console", "/shell", "/ping", "/trace"])
+        command_output_markers = ["uid=", "gid=", "root\n", "sh:", "bin/bash", "linux", "windows ip configuration", "command not found"]
+        if any(marker in body for marker in command_output_markers) and command_like_path:
             findings.append({
                 "name": "Potential command injection",
                 "severity": "Critical",
@@ -206,7 +229,8 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"command_injection:{path or final_url}",
             })
-        if any(marker in body for marker in ["<script", "onerror=", "alert("]) and "/board" in final_url:
+        content_like_path = any(token in path.lower() for token in ["/board", "/post", "/comment", "/message", "/article", "/feed"])
+        if any(marker in body for marker in ["<script", "onerror=", "alert("]) and content_like_path:
             findings.append({
                 "name": "Potential stored XSS",
                 "severity": "High",
@@ -216,7 +240,8 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"stored_xss:{path or final_url}",
             })
-        if any(token_path in final_url for token_path in ["/api/token", "/token-lab", "/token"]) and any(token in body for token in ['"alg":"none"', '"alg": "none"', "unsigned", "bearer"]):
+        token_like_path = any(token_path in final_url for token_path in ["/api/token", "/token", "/jwt", "/oauth"])
+        if token_like_path and any(token in body for token in ['"alg":"none"', '"alg": "none"', "unsigned", "bearer"]):
             findings.append({
                 "name": "Potential unsigned bearer token",
                 "severity": "High",
@@ -226,7 +251,7 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"unsigned_token:{path or final_url}",
             })
-        if "/template" in final_url and any(marker in body for marker in ["49", "jinja", "template error", "rendered", "{{7*7}}"]):
+        if any(token in path.lower() for token in ["/template", "/render", "/preview", "/view"]) and any(marker in body for marker in ["49", "jinja", "template error", "rendered", "{{7*7}}", "twig", "freemarker"]):
             findings.append({
                 "name": "Potential server-side template injection",
                 "severity": "High",
@@ -236,7 +261,7 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"ssti:{path or final_url}",
             })
-        if "/import" in final_url and any(marker in body for marker in ["pickle", "deserialize", "deserializ", "__reduce__", "object restored"]):
+        if any(token in path.lower() for token in ["/import", "/upload", "/restore", "/deserialize"]) and any(marker in body for marker in ["pickle", "deserialize", "deserializ", "__reduce__", "object restored"]):
             findings.append({
                 "name": "Potential unsafe deserialization",
                 "severity": "Critical",
@@ -246,7 +271,7 @@ class AnalysisEngine:
                 "affected_resource": final_url,
                 "fingerprint": f"deserialization:{path or final_url}",
             })
-        if "/csrf" in final_url and "<form" in body and not any(token in body for token in ["_csrf", "csrf_token", "csrfmiddlewaretoken"]):
+        if any(token in path.lower() for token in ["/csrf", "/settings", "/profile", "/admin", "/account", "/checkout"]) and "<form" in body and not any(token in body for token in ["_csrf", "csrf_token", "csrfmiddlewaretoken"]):
             findings.append({
                 "name": "Potential missing CSRF protection",
                 "severity": "Medium",
@@ -257,7 +282,7 @@ class AnalysisEngine:
                 "fingerprint": f"csrf:{path or final_url}",
             })
         if any(marker in body for marker in ["without csrf protection", "no csrf protection"]) and (
-            path == "/" or any(marker in path for marker in ["/admin", "/campaign", "/missions", "/telemetry"])
+            path == "/" or any(marker in path.lower() for marker in ["/admin", "/settings", "/profile", "/campaign", "/missions", "/telemetry"])
         ):
             findings.append({
                 "name": "Potential missing CSRF protection",
@@ -656,7 +681,7 @@ class AnalysisEngine:
             return "RCE"
         if "deserialization" in text:
             return "RCE"
-        if "idor" in text or "/account" in text:
+        if "idor" in text or any(token in text for token in ["/account", "/profile", "/user", "/member", "/customer", "/order"]):
             return "Authorization"
         if "token" in text or "jwt" in text or "bearer" in text:
             return "Authentication"
@@ -666,7 +691,7 @@ class AnalysisEngine:
             return "Session"
         if "websocket" in text or "/ws" in text:
             return "Realtime"
-        if "ssrf" in text or "/fetch" in text:
+        if "ssrf" in text or any(token in text for token in ["/fetch", "/proxy", "/url", "/webhook", "/import"]):
             return "Server-Side Request"
         if "file" in text or "download" in text:
             return "File Access"

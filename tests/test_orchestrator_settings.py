@@ -166,3 +166,65 @@ def test_webapp_low_value_loop_does_not_redirect_first_homepage_visit(tmp_path):
     assert action["type"] == "tool"
     assert action["tool"] == "web_interact"
     assert action["params"]["path"] == "/"
+
+
+def test_candidate_web_paths_are_derived_from_discovery_and_html(tmp_path):
+    orchestrator = Orchestrator(
+        target="http://localhost:3000",
+        scope="",
+        data_dir=str(tmp_path),
+        llm_enabled=False,
+        require_user_confirmation=False,
+        mode="webapp",
+    )
+    orchestrator.state = {
+        "phase": "recon",
+        "history": [
+            {
+                "tool": "web_interact",
+                "params": {"path": "/", "method": "GET"},
+                "result": {
+                    "response_preview": '<a href="/portal/login">Login</a><a href="/products/search">Search</a><form action="/upload"></form>'
+                },
+            },
+            {
+                "tool": "gobuster",
+                "params": {"url": "http://localhost:3000/"},
+                "result": {"raw": "admin                (Status: 403)\napi/users            (Status: 200)\n"},
+            },
+        ],
+        "findings": [],
+        "target": "http://localhost:3000",
+        "scope": "",
+    }
+    paths = orchestrator._candidate_web_paths()
+    assert "/portal/login" in paths
+    assert "/products/search" in paths
+    assert "/upload" in paths
+    assert "/admin" in paths
+    assert "/api/users" in paths
+
+
+def test_best_sqlmap_target_prefers_discovered_search_route(tmp_path):
+    orchestrator = Orchestrator(
+        target="http://localhost:3000",
+        scope="",
+        data_dir=str(tmp_path),
+        llm_enabled=False,
+        require_user_confirmation=False,
+        mode="webapp",
+    )
+    orchestrator.state = {
+        "phase": "recon",
+        "history": [
+            {
+                "tool": "web_interact",
+                "params": {"path": "/", "method": "GET"},
+                "result": {"response_preview": '<a href="/products/search">Search</a>'},
+            }
+        ],
+        "findings": [],
+        "target": "http://localhost:3000",
+        "scope": "",
+    }
+    assert orchestrator._best_sqlmap_target("http://localhost:3000") == "http://localhost:3000/products/search?q=test"

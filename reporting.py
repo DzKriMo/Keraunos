@@ -19,22 +19,14 @@ CONFIDENCE_LABELS = [
     (0.0, "Tentative"),
 ]
 WEBAPP_ROUTE_HINTS = [
+    "/login",
+    "/register",
     "/search",
-    "/account",
-    "/board/1",
-    "/fetch",
-    "/diagnostics",
+    "/admin",
+    "/api",
+    "/upload",
     "/download",
-    "/api/token",
-    "/api/admin/reports",
-    "/csrf-demo",
-    "/import-lab",
-    "/template-lab",
     "/ws",
-    "/missions",
-    "/telemetry",
-    "/campaign",
-    "/api/export",
 ]
 
 

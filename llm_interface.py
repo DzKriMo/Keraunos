@@ -450,14 +450,16 @@ class LLMInterface:
             mode_desc = (
                 "CURRENT MODE: Web Application Assessment & Exploitation.\n"
                 "MISSION: Identify and EXPLOIT web vulnerabilities like XSS, SQL Injection, SSRF, IDOR, file read, template injection, command injection, unsafe upload, weak auth, weak WebSocket auth, and CSRF. "
-                "You are testing the local Pandora lab, which contains multiple chained vulnerabilities.\n"
+                "Treat the target as an arbitrary web application, not a known lab.\n"
                 "STRATEGY:\n"
                 "1. Prefer `web_interact` for route discovery, login, form use, file upload, browser navigation, payload delivery, and visible dashboard telemetry.\n"
                 "2. Use `websocket_interact` when a route exposes weak WebSocket authorization or action channels.\n"
-                "3. Prioritize Pandora routes when present: `/search`, `/account?id=`, `/board/:id`, `/fetch`, `/diagnostics`, `/download`, `/api/token`, `/api/admin/reports`, `/csrf-demo`, `/import-lab`, `/template-lab`, `/ws`, `/uploads`, `/missions`, `/telemetry`, `/campaign`, `/api/export`.\n"
-                "4. Try seeded credentials when useful: `admin/admin123`, `analyst/password`, `guest/guest`.\n"
-                "5. Capture concrete evidence in responses, cookies, redirects, DOM content, screenshots, and browser action traces.\n"
-                "6. When a vulnerability is confirmed, continue to the next exploitable stage rather than stopping at detection.\n\n"
+                "3. Infer high-signal routes from the observed app structure: navigation links, forms, JavaScript, API calls, sitemap-like endpoints, auth flows, admin areas, search, file upload/download, fetch/import/template features, telemetry, export, and WebSocket endpoints.\n"
+                "4. Prioritize actions that increase coverage across distinct routes and user roles instead of repeating homepage inspection.\n"
+                "5. Use discovered credentials, default credentials, registration flows, password reset flows, and token endpoints when useful, but do not assume any specific lab credentials unless the application exposes them.\n"
+                "6. Capture concrete evidence in responses, cookies, redirects, DOM content, screenshots, and browser action traces.\n"
+                "7. When a vulnerability is confirmed, continue to the next exploitable stage rather than stopping at detection.\n"
+                "8. Favor app-specific reasoning over canned route names. Use the target's own content, responses, and links to decide what to probe next.\n\n"
             )
         elif self.mode == "system":
             mode_desc = (
