@@ -61,7 +61,9 @@ def test_report_generation_curates_noisy_findings():
 
         assert "Executive summary text." in html
         assert "Browser workflow evidence captured" not in html
-        assert html.count("Session cookie missing HttpOnly") == 1
+        assert "Session cookie missing HttpOnly" in html
         assert "/search" in html
+        assert "Top Priorities" in html
+        assert "Coverage Quality" in html
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)

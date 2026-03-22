@@ -260,7 +260,8 @@
         }
 
         .input-group input,
-        .input-group select {
+        .input-group select,
+        .input-group textarea {
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -273,8 +274,34 @@
         }
 
         .input-group input:focus,
-        .input-group select:focus {
+        .input-group select:focus,
+        .input-group textarea:focus {
             border-color: var(--accent-blue);
+        }
+
+        .input-group textarea {
+            min-height: 92px;
+            resize: vertical;
+        }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .inline-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.02);
+            font-size: 12px;
+            color: var(--text-secondary);
         }
 
         .btn {
@@ -988,8 +1015,51 @@
                             <input type="number" id="maxStepsInput" value="40" min="1" max="500">
                         </div>
                         <div class="input-group">
-                            <label>Mode Settings (JSON)</label>
-                            <input type="text" id="settingsInput" placeholder='Optional JSON settings' value="">
+                            <label>Engagement Profile</label>
+                            <select id="aggressivenessInput">
+                                <option value="balanced">Balanced</option>
+                                <option value="aggressive">Aggressive</option>
+                                <option value="cautious">Cautious</option>
+                            </select>
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">
+                                Controls how hard Keraunos pushes route expansion, auth attempts, payload variety, and fuzzing defaults.
+                            </div>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="input-group">
+                                <label>Route Budget</label>
+                                <input type="number" id="routeBudgetInput" value="2" min="1" max="6">
+                            </div>
+                            <div class="input-group">
+                                <label>Login Attempts</label>
+                                <input type="number" id="loginAttemptsInput" value="2" min="0" max="6">
+                            </div>
+                            <div class="input-group">
+                                <label>Tool Timeout (sec)</label>
+                                <input type="number" id="toolTimeoutInput" value="300" min="10" max="1800">
+                            </div>
+                            <div class="input-group">
+                                <label>FFUF Threads</label>
+                                <input type="number" id="ffufThreadsInput" value="40" min="1" max="200">
+                            </div>
+                            <div class="input-group">
+                                <label>Gobuster Threads</label>
+                                <input type="number" id="gobusterThreadsInput" value="10" min="1" max="100">
+                            </div>
+                        </div>
+                        <div class="settings-grid">
+                            <label class="inline-toggle">
+                                <span>Browser Exploration Enabled</span>
+                                <input type="checkbox" id="browserEnabledInput" checked>
+                            </label>
+                            <label class="inline-toggle">
+                                <span>Headless Browser</span>
+                                <input type="checkbox" id="browserHeadlessInput" checked>
+                            </label>
+                        </div>
+                        <div class="input-group">
+                            <label>Advanced Settings Override (JSON)</label>
+                            <textarea id="settingsInput" placeholder='Optional JSON override, merged on top of the controls above'></textarea>
                         </div>
                         <div class="input-group">
                             <label>API Key</label>
@@ -1284,10 +1354,10 @@
             const settingsRaw = document.getElementById('settingsInput').value.trim();
             if (!target) return;
 
-            let settings = {};
+            let settings = buildRunSettings();
             if (settingsRaw) {
                 try {
-                    settings = JSON.parse(settingsRaw);
+                    settings = mergeDeep(settings, JSON.parse(settingsRaw));
                 } catch (e) {
                     addEvent('error', 'Invalid settings JSON', e.message || 'Could not parse settings');
                     return;
@@ -1332,7 +1402,7 @@
             setStatusFromValue(run.status || 'queued');
             updateRunControls(run.status || 'queued');
             document.getElementById('modeInput').value = run.mode || 'system';
-            document.getElementById('settingsInput').value = JSON.stringify(run.settings_json || {});
+            applySettingsToControls(run.settings_json || {});
             updatePreview(run.mode || 'system', run.target || '');
 
             if (['queued', 'running', 'paused'].includes(run.status)) {
@@ -1789,6 +1859,53 @@
                 settingsInput.value = JSON.stringify({ prompt_field: 'prompt', response_field: 'response' });
             }
             updatePreview(mode, target);
+        }
+
+        function mergeDeep(base, override) {
+            const result = { ...(base || {}) };
+            Object.entries(override || {}).forEach(([key, value]) => {
+                if (value && typeof value === 'object' && !Array.isArray(value) && result[key] && typeof result[key] === 'object' && !Array.isArray(result[key])) {
+                    result[key] = mergeDeep(result[key], value);
+                } else {
+                    result[key] = value;
+                }
+            });
+            return result;
+        }
+
+        function buildRunSettings() {
+            return {
+                web: {
+                    profile: document.getElementById('aggressivenessInput').value,
+                    route_budget: parseInt(document.getElementById('routeBudgetInput').value || '2', 10),
+                    login_attempts: parseInt(document.getElementById('loginAttemptsInput').value || '2', 10),
+                    browser_enabled: document.getElementById('browserEnabledInput').checked,
+                },
+                browser: {
+                    headless: document.getElementById('browserHeadlessInput').checked,
+                },
+                tooling: {
+                    timeout: parseInt(document.getElementById('toolTimeoutInput').value || '300', 10),
+                    ffuf_threads: parseInt(document.getElementById('ffufThreadsInput').value || '40', 10),
+                    gobuster_threads: parseInt(document.getElementById('gobusterThreadsInput').value || '10', 10),
+                },
+            };
+        }
+
+        function applySettingsToControls(settings) {
+            const config = settings || {};
+            const web = config.web || {};
+            const browser = config.browser || {};
+            const tooling = config.tooling || {};
+            document.getElementById('aggressivenessInput').value = web.profile || 'balanced';
+            document.getElementById('routeBudgetInput').value = web.route_budget || 2;
+            document.getElementById('loginAttemptsInput').value = web.login_attempts ?? 2;
+            document.getElementById('browserEnabledInput').checked = web.browser_enabled !== false;
+            document.getElementById('browserHeadlessInput').checked = browser.headless !== false;
+            document.getElementById('toolTimeoutInput').value = tooling.timeout || 300;
+            document.getElementById('ffufThreadsInput').value = tooling.ffuf_threads || 40;
+            document.getElementById('gobusterThreadsInput').value = tooling.gobuster_threads || 10;
+            document.getElementById('settingsInput').value = '';
         }
 
         function updatePreview(mode, target) {

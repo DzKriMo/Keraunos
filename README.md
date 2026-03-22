@@ -92,6 +92,42 @@ The dashboard is the primary interface for normal usage. It supports:
 - results repository browsing with date and time stamps
 - rendered HTML report viewing
 
+### Dashboard Fields
+
+The `Mission Configuration` panel exposes the main operator controls.
+
+- `Assessment Mode`: selects the testing posture. Use `webapp` for browser-backed application testing, `system` for host and service review, `ai_agent` for LLM application assessment, and `legacy` only for the older generic flow.
+- `Target Host`: the primary target to assess. In `webapp` mode this is usually a full URL such as `http://localhost:3000`. In `system` mode it can be a hostname or IP.
+- `Scope / CIDR`: a human-readable or network-style scope hint stored with the run. It is useful for reporting and operator context, and can also reflect the intended target boundary.
+- `Complexity Limit (Steps)`: the maximum number of orchestration steps in the run. Increase it for deeper coverage; lower it for faster, more constrained passes.
+- `Engagement Profile`: high-level aggressiveness for `webapp` runs.
+  - `Cautious`: fewer routes, fewer credential attempts, lower tooling pressure.
+  - `Balanced`: sensible default for most runs.
+  - `Aggressive`: wider route expansion, more payload variety, more login attempts, and stronger fuzzing defaults.
+- `Route Budget`: how many candidate routes per attack surface Keraunos should actively chase in the deterministic web workflow. Higher values increase coverage and runtime.
+- `Login Attempts`: how many default or discovered credential sets Keraunos should try in the deterministic web workflow. This is mainly relevant in `webapp` mode.
+- `Tool Timeout (sec)`: default timeout applied to tool execution before policy clamping. Raise this for slow targets or heavier scans.
+- `FFUF Threads`: thread count for `ffuf` when not overridden elsewhere. Higher values are faster but noisier.
+- `Gobuster Threads`: thread count for `gobuster` when not overridden elsewhere. Higher values increase discovery speed at the cost of more load.
+- `Browser Exploration Enabled`: enables browser-backed interaction for `webapp` mode. Turn this off if you want Keraunos to rely on HTTP requests only.
+- `Headless Browser`: controls whether Playwright runs headless. Keep it on for automation; turn it off only if you need visible browser debugging in a local environment.
+- `Advanced Settings Override (JSON)`: optional JSON merged on top of the structured controls above. Use this for settings that are not yet exposed directly in the UI.
+- `API Key`: optional `X-API-Key` sent with requests from the dashboard. This is only needed if the server is started with `KERAUNOS_API_KEY` configured.
+
+The header also exposes live LLM controls:
+
+- `LLM Provider`: switches between `OpenRouter` and `Ollama`.
+- `LLM Model`: appears for `Ollama` and lets you select from locally available models.
+- `Neural Link Toggle`: enables or disables LLM usage for new runs. When disabled, Keraunos falls back to deterministic planning logic.
+
+The repository and live panels provide operational visibility:
+
+- `Results Repository`: lists available reports with timestamps so you can reopen or export prior runs.
+- `Model Reasoning (Live)`: shows the planner’s reasoning trace as the run progresses.
+- `Live Target Preview`: shows browser-driven target activity when browser telemetry is available.
+- `Mission Activity Log`: chronological execution feed for tools, status changes, and controller events.
+- `Findings`: live curated findings table during the run.
+
 ## LLM Configuration
 
 Keraunos supports both local and hosted LLM backends.

@@ -54,6 +54,9 @@ class ReportGenerator:
         coverage = self._build_coverage(history)
         coverage_gaps = self._build_coverage_gaps(history)
         category_summary = self._build_category_summary(curated_findings)
+        priority_findings = self._build_priority_findings(curated_findings)
+        coverage_summary = self._build_coverage_summary(coverage, coverage_gaps)
+        attack_surface = self._build_attack_surface_summary(history)
 
         with open(self.template_path, "r", encoding="utf-8") as f:
             template = Template(f.read())
@@ -67,7 +70,10 @@ class ReportGenerator:
             tool_summary=tool_summary,
             coverage=coverage,
             coverage_gaps=coverage_gaps,
+            coverage_summary=coverage_summary,
             category_summary=category_summary,
+            priority_findings=priority_findings,
+            attack_surface=attack_surface,
         )
 
         safe_target = self._safe_name(target)
@@ -204,7 +210,53 @@ class ReportGenerator:
             "low": severities.get("Low", 0),
             "actions": len(history),
             "confirmed_or_strong": len(strong_findings),
+            "coverage_count": len(self._build_coverage(history)),
         }
+
+    def _build_priority_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        ranked = []
+        for finding in findings:
+            score = (10 - SEVERITY_ORDER.get(finding.get("severity", "Low"), 9)) * 100
+            score += int(float(finding.get("confidence", 0.0)) * 100)
+            ranked.append((score, finding))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in ranked[:5]]
+
+    def _build_coverage_summary(self, coverage: List[str], coverage_gaps: List[str]) -> Dict[str, Any]:
+        gap_count = len(coverage_gaps)
+        covered = len(coverage)
+        if covered >= 12 and gap_count <= 2:
+            posture = "Broad"
+        elif covered >= 6:
+            posture = "Moderate"
+        else:
+            posture = "Thin"
+        return {
+            "covered_routes": covered,
+            "gap_count": gap_count,
+            "posture": posture,
+        }
+
+    def _build_attack_surface_summary(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        buckets = {
+            "Authentication": ["/login", "/signin", "/auth", "/register", "/session"],
+            "Search and Query": ["/search", "/find", "/query", "/lookup"],
+            "Admin and Sensitive": ["/admin", "/manage", "/dashboard", "/reports"],
+            "File Handling": ["/upload", "/download", "/export", "/file", "/import"],
+            "Realtime": ["/ws", "/socket", "/websocket"],
+            "API": ["/api"],
+        }
+        coverage = self._build_coverage(history)
+        rows = []
+        for name, markers in buckets.items():
+            matched = [path for path in coverage if any(marker in path.lower() for marker in markers)]
+            rows.append({
+                "name": name,
+                "count": len(matched),
+                "status": "Observed" if matched else "Not observed",
+                "examples": matched[:3],
+            })
+        return rows
 
     def _build_category_summary(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         counts = Counter()

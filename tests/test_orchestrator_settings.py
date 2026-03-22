@@ -228,3 +228,25 @@ def test_best_sqlmap_target_prefers_discovered_search_route(tmp_path):
         "scope": "",
     }
     assert orchestrator._best_sqlmap_target("http://localhost:3000") == "http://localhost:3000/products/search?q=test"
+
+
+def test_web_profile_settings_drive_browser_default_and_threads(tmp_path):
+    orchestrator = Orchestrator(
+        target="http://localhost:3000",
+        scope="",
+        data_dir=str(tmp_path),
+        llm_enabled=False,
+        require_user_confirmation=False,
+        mode="webapp",
+        settings={
+            "web": {"profile": "aggressive", "browser_enabled": False},
+            "tooling": {"ffuf_threads": 77, "gobuster_threads": 21, "timeout": 123},
+        },
+    )
+    web_params = orchestrator._default_params_for_tool("web_interact", {"path": "/"})
+    ffuf_params = orchestrator._apply_tool_constraints("ffuf", {})
+    gobuster_params = orchestrator._apply_tool_constraints("gobuster", {})
+    assert web_params["browser"] is False
+    assert ffuf_params["threads"] == 77
+    assert gobuster_params["threads"] == 21
+    assert ffuf_params["timeout"] == 123
