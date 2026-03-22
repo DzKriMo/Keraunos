@@ -14,8 +14,8 @@ env/
 
 # Local data and reports
 data/
-report_*.html
-report_*.pdf
+/report_*.html
+/report_*.pdf
 
 # OS/editor
 .DS_Store
