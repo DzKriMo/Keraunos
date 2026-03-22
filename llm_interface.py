@@ -363,11 +363,19 @@ class LLMInterface:
             backend: Custom LLMBackend instance (if None, creates OllamaBackend)
         """
         self.role = role.strip().lower() if role else "planner"
-        provider = (provider or self._role_env("PROVIDER") or os.getenv("KERAUNOS_LLM_PROVIDER") or "").strip().lower()
+        explicit_provider = bool(provider)
+        role_provider = self._role_env("PROVIDER")
+        env_provider = os.getenv("KERAUNOS_LLM_PROVIDER", "").strip().lower()
+        provider = (provider or role_provider or env_provider or "").strip().lower()
         if not provider:
             provider = "openrouter" if os.getenv("OPENROUTER_API_KEY") else "ollama"
+        else:
+            explicit_provider = True
         self.provider = provider
-        self.model = model or self._default_model_for_provider(provider)
+        self._provider_was_explicit = explicit_provider
+        self.model = model or self._default_model_for_provider(provider, explicit_provider)
+        if timeout == 60 and provider == "ollama":
+            timeout = int(os.getenv("KERAUNOS_OLLAMA_TIMEOUT_SECONDS", "180"))
         self.timeout = timeout
         self.max_retries = max_retries
         self.mode = mode
@@ -392,14 +400,14 @@ class LLMInterface:
         # Initialize conversation with system prompt
         self.conversation.add_message("system", self.system_prompt)
 
-    def _default_model_for_provider(self, provider: str) -> str:
+    def _default_model_for_provider(self, provider: str, provider_explicit: bool) -> str:
         if provider == "openrouter":
-            return (
-                self._role_env("MODEL")
-                or os.getenv("KERAUNOS_LLM_MODEL")
-                or "stepfun/step-3.5-flash:free"
-            )
-        return self._role_env("MODEL") or os.getenv("KERAUNOS_LLM_MODEL", "deepseek-r1:8b")
+            return self._role_env("MODEL") or (
+                os.getenv("KERAUNOS_LLM_MODEL") if provider_explicit else None
+            ) or "stepfun/step-3.5-flash:free"
+        return self._role_env("MODEL") or (
+            os.getenv("KERAUNOS_LLM_MODEL") if provider_explicit else None
+        ) or "deepseek-r1:8b"
 
     def _role_env(self, suffix: str) -> str:
         role_key = self.role.upper()
@@ -410,7 +418,8 @@ class LLMInterface:
             api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
             if not api_key:
                 raise ValueError("OPENROUTER_API_KEY is required when KERAUNOS_LLM_PROVIDER=openrouter")
-            base_url = base_url or self._role_env("URL") or os.getenv("KERAUNOS_LLM_URL", "https://openrouter.ai/api/v1")
+            implicit_env_url = os.getenv("KERAUNOS_LLM_URL", "").strip() if self._provider_was_explicit else ""
+            base_url = base_url or self._role_env("URL") or implicit_env_url or "https://openrouter.ai/api/v1"
             referer = os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost:8000")
             title = os.getenv("OPENROUTER_X_TITLE", "Keraunos")
             return OpenAICompatibleBackend(
@@ -423,7 +432,8 @@ class LLMInterface:
                     "X-Title": title,
                 },
             )
-        base_url = base_url or self._role_env("URL") or os.getenv("KERAUNOS_LLM_URL", "http://localhost:11434")
+        implicit_env_url = os.getenv("KERAUNOS_LLM_URL", "").strip() if self._provider_was_explicit else ""
+        base_url = base_url or self._role_env("URL") or implicit_env_url or "http://localhost:11434"
         return OllamaBackend(base_url, self.model, self.timeout)
 
     def _build_mode_system_prompt(self) -> str:
@@ -703,7 +713,10 @@ Output ONLY the summary text, no JSON.
         # Query backend
         start_time = time.time()
         try:
-            raw_response = self.backend.generate(prompt)
+            generate_kwargs = {}
+            if isinstance(self.backend, OllamaBackend) and prompt_type in {"next_action", "analyze"}:
+                generate_kwargs["format"] = "json"
+            raw_response = self.backend.generate(prompt, **generate_kwargs)
         except requests.HTTPError as exc:
             status_code = exc.response.status_code if exc.response is not None else None
             if status_code == 429:
@@ -714,7 +727,10 @@ Output ONLY the summary text, no JSON.
             if status_code == 400 and context is not None:
                 logger.warning("Provider rejected prompt with HTTP 400; retrying once with a compact prompt.")
                 compact_prompt = self.build_prompt(prompt_type, self._compact_context(context))
-                raw_response = self.backend.generate(compact_prompt)
+                generate_kwargs = {}
+                if isinstance(self.backend, OllamaBackend) and prompt_type in {"next_action", "analyze"}:
+                    generate_kwargs["format"] = "json"
+                raw_response = self.backend.generate(compact_prompt, **generate_kwargs)
             else:
                 raise
         self.rate_limit_streak = 0
@@ -735,7 +751,7 @@ Output ONLY the summary text, no JSON.
         if prompt_type == "report_executive":
             # For executive summary, just return the text (no JSON expected)
             cleaned = re.sub(r"<think>.*?</think>", "", raw_response, flags=re.DOTALL).strip()
-            return {"result": cleaned, "reasoning": reasoning}
+            return {"result": cleaned, "reasoning": reasoning, "raw_response": raw_response}
 
         json_data = self._extract_json(raw_response)
         if json_data is None:
@@ -764,7 +780,7 @@ Output ONLY the summary text, no JSON.
             # Fallback: return raw JSON
             validated_result = json_data
 
-        return {"result": validated_result, "reasoning": reasoning}
+        return {"result": validated_result, "reasoning": reasoning, "raw_response": raw_response}
 
     def check_connection(self) -> bool:
         """Check if the LLM backend is reachable and the model exists."""

@@ -171,6 +171,7 @@ class Orchestrator:
             response_data = self.llm.query(prompt_type, context)
             result = response_data["result"]
             reasoning = response_data.get("reasoning", "")
+            raw_response = response_data.get("raw_response", "")
 
             # Emit reasoning to dashboard
             if reasoning:
@@ -194,7 +195,8 @@ class Orchestrator:
                     if not reasoning:
                         self._emit_reasoning(self._describe_action_reasoning(normalized))
                     return normalized
-                self._emit_reasoning("LLM produced an invalid next action, so Keraunos switched to the fallback planner.")
+                invalid_detail = self._summarize_invalid_next_action(parsed, raw_response)
+                self._emit_reasoning(f"LLM produced an invalid next action ({invalid_detail}), so Keraunos switched to the fallback planner.")
                 self._emit_progress("llm_validation_failed", {"reason": "invalid_next_action"})
                 return self._fallback_action(prompt_type, context)
             return parsed
@@ -211,6 +213,7 @@ class Orchestrator:
             return self._fallback_action(prompt_type, context)
 
     def _normalize_next_action(self, action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        action = self._coerce_next_action_shape(action)
         if not isinstance(action, dict):
             return {}
         action_type = action.get("type")
@@ -234,11 +237,89 @@ class Orchestrator:
         raw_params = action.get("params")
         params = raw_params if isinstance(raw_params, dict) else {}
         params = self._default_params_for_tool(tool_name, params)
-        if self.mode == "webapp" and tool_name == "nmap" and self._webapp_routes_seen() < 5:
-            return {}
+        if self.mode == "webapp":
+            redirected = self._redirect_webapp_tool(tool_name, params)
+            if redirected:
+                return redirected
         if self._is_duplicate_tool_request(tool_name, params):
             return {}
         return {"type": "tool", "tool": tool_name, "params": params}
+
+    def _coerce_next_action_shape(self, action: Any) -> Dict[str, Any]:
+        if isinstance(action, str):
+            lowered = action.strip().lower()
+            if lowered in {"complete", "done", "finish"}:
+                return {"type": "complete"}
+            if lowered in {"analysis", "analyze"}:
+                return {"type": "analysis"}
+            return {}
+        if not isinstance(action, dict):
+            return {}
+
+        if isinstance(action.get("next_action"), dict):
+            action = action["next_action"]
+        elif isinstance(action.get("result"), dict) and any(key in action["result"] for key in ("type", "tool", "action", "kind")):
+            action = action["result"]
+
+        normalized = dict(action)
+        normalized_type = normalized.get("type") or normalized.get("action") or normalized.get("kind")
+        if isinstance(normalized_type, str):
+            normalized_type = normalized_type.strip().lower()
+            alias_map = {
+                "tool_use": "tool",
+                "use_tool": "tool",
+                "run_tool": "tool",
+                "call_tool": "tool",
+                "finish": "complete",
+                "done": "complete",
+                "analyze": "analysis",
+            }
+            normalized["type"] = alias_map.get(normalized_type, normalized_type)
+
+        if "type" not in normalized and normalized.get("tool"):
+            normalized["type"] = "tool"
+
+        if normalized.get("type") == "tool":
+            if "params" not in normalized:
+                params = normalized.get("parameters")
+                if not isinstance(params, dict):
+                    params = normalized.get("arguments")
+                normalized["params"] = params if isinstance(params, dict) else {}
+        return normalized
+
+    def _summarize_invalid_next_action(self, action: Any, raw_response: str) -> str:
+        if isinstance(action, dict):
+            action_type = action.get("type") or action.get("action") or action.get("kind") or "unknown"
+            tool = action.get("tool") or action.get("name") or "unknown"
+            return f"type={action_type}, tool={tool}"
+        text = str(raw_response or action or "").strip().replace("\n", " ")
+        return text[:120] if text else "unparseable response"
+
+    def _redirect_webapp_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        routes_seen = self._webapp_routes_seen()
+        if tool_name == "web_interact" and self._is_low_value_webapp_loop(params):
+            next_step = self._next_unseen_webapp_step()
+            if next_step:
+                redirected_tool = next_step.get("tool")
+                redirected_params = next_step.get("params", {})
+                if redirected_tool and not self._is_duplicate_tool_request(redirected_tool, redirected_params):
+                    self._emit_reasoning(
+                        "LLM selected another low-value homepage browser action, so webapp mode redirected the step into the next unseen exploit path."
+                    )
+                    return next_step
+        if tool_name == "nmap" and routes_seen < 5:
+            redirected_tool = "gobuster"
+            redirected_params = self._default_params_for_tool("gobuster", {})
+            if not self._is_duplicate_tool_request(redirected_tool, redirected_params):
+                self._emit_reasoning("LLM selected `nmap`, but webapp mode redirected that step into route discovery to keep the assessment focused on application coverage.")
+                return {"type": "tool", "tool": redirected_tool, "params": redirected_params}
+        if tool_name == "http_probe" and routes_seen < 3:
+            redirected_tool = "web_interact"
+            redirected_params = self._default_params_for_tool("web_interact", {"path": "/", "method": "GET", "browser": True})
+            if not self._is_duplicate_tool_request(redirected_tool, redirected_params):
+                self._emit_reasoning("LLM selected `http_probe`, but webapp mode redirected that step into browser-backed route exploration for stronger application evidence.")
+                return {"type": "tool", "tool": redirected_tool, "params": redirected_params}
+        return {}
 
     def _default_params_for_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         normalized = dict(params)
@@ -313,6 +394,59 @@ class Orchestrator:
             if previous == params:
                 return True
         return False
+
+    def _is_low_value_webapp_loop(self, params: Dict[str, Any]) -> bool:
+        path = str(params.get("path") or "/").split("?", 1)[0]
+        method = str(params.get("method", "GET")).upper()
+        browser = bool(params.get("browser"))
+        browser_action = str(params.get("browser_action", "goto")).lower()
+        if path != "/" or method != "GET" or not browser or browser_action not in {"goto", "evaluate"}:
+            return False
+
+        repeats = 0
+        for event in reversed(self.state.get("history", [])):
+            if event.get("tool") != "web_interact":
+                continue
+            previous = event.get("params", {})
+            previous_path = str(previous.get("path") or "/").split("?", 1)[0]
+            previous_method = str(previous.get("method", "GET")).upper()
+            previous_action = str(previous.get("browser_action", "goto")).lower()
+            if previous_path == "/" and previous_method == "GET" and previous_action in {"goto", "evaluate"}:
+                repeats += 1
+            if repeats >= 2:
+                return True
+        return False
+
+    def _next_unseen_webapp_step(self) -> Dict[str, Any]:
+        base_url = self.target if str(self.target).startswith(("http://", "https://")) else f"http://{self.target}"
+        parsed_base = urlparse(base_url)
+        ws_target = parsed_base.netloc or self.target.replace("http://", "").replace("https://", "")
+        tools_run = [item.get("tool") for item in self.state.get("history", []) if item.get("tool")]
+
+        def seen_step(step: Dict[str, Any]) -> bool:
+            tool_name = step.get("tool")
+            params = step.get("params", {})
+            if tool_name == "web_interact":
+                for item in self.state.get("history", []):
+                    if item.get("tool") != "web_interact":
+                        continue
+                    previous = item.get("params", {})
+                    if str(previous.get("path") or "/") != str(params.get("path") or "/"):
+                        continue
+                    if str(previous.get("method", "GET")).upper() != str(params.get("method", "GET")).upper():
+                        continue
+                    if previous.get("session_name") != params.get("session_name"):
+                        continue
+                    return True
+                return False
+            if tool_name == "websocket_interact":
+                return "websocket_interact" in tools_run
+            return tool_name in tools_run
+
+        for step in self._webapp_playbook(base_url, ws_target):
+            if not seen_step(step):
+                return step
+        return {}
 
     def _filter_llm_findings(self, findings: list) -> list:
         accepted = []

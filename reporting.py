@@ -42,7 +42,7 @@ class ReportGenerator:
     def __init__(self, data_store):
         self.data_store = data_store
         self.llm = LLMInterface(role="report")
-        self.template_path = Path(__file__).parent / "templates" / "report_template.html"
+        self.template_path = self._resolve_template_path()
 
     def generate(self, format: str = "html") -> str:
         state = self.data_store.load_state()
@@ -102,6 +102,19 @@ class ReportGenerator:
         context["history"] = history[-20:]
         context["stats"] = self._build_stats(findings, history)
         return context
+
+    def _resolve_template_path(self) -> Path:
+        candidates = [
+            Path(__file__).resolve().parent / "templates" / "report_template.html",
+            Path.cwd() / "templates" / "report_template.html",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        raise FileNotFoundError(
+            "Could not locate templates/report_template.html. "
+            f"Tried: {', '.join(str(path) for path in candidates)}"
+        )
 
     def _normalize_executive_summary(self, exec_summary: Any) -> str:
         if isinstance(exec_summary, dict):

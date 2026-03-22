@@ -933,7 +933,10 @@
             <select id="llmProviderSelect" onchange="changeLLMProvider()"
                 style="background: rgba(15, 23, 42, 0.9); color: var(--text-primary); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 700;">
                 <option value="openrouter">OpenRouter</option>
-                <option value="ollama">Ollama · deepseek-r1:8b</option>
+                <option value="ollama">Ollama</option>
+            </select>
+            <select id="llmModelSelect" onchange="changeLLMModel()"
+                style="display:none; max-width: 240px; background: rgba(15, 23, 42, 0.9); color: var(--text-primary); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 700;">
             </select>
             <label class="switch">
                 <input type="checkbox" id="llmToggle" checked onchange="toggleLLM()">
@@ -1168,6 +1171,7 @@
         let browserActionCounter = 0;
         let pendingConfirmId = null;
         let currentRunStatus = 'idle';
+        let ollamaModelsCache = [];
 
         const API_BASE = window.location.origin;
         const API_KEY_STORAGE = 'keraunos.apiKey';
@@ -1907,11 +1911,21 @@
                 const toggle = document.getElementById('llmToggle');
                 const modelSpan = document.getElementById('aiModel');
                 const providerSelect = document.getElementById('llmProviderSelect');
+                const modelSelect = document.getElementById('llmModelSelect');
                 const providerLabel = status.provider ? `${status.provider.toUpperCase()} :: ` : '';
 
                 toggle.checked = status.enabled;
                 if (providerSelect && status.provider) {
                     providerSelect.value = status.provider;
+                }
+                if (status.provider === 'ollama') {
+                    const items = (((status.available_models || {}).ollama) || []);
+                    ollamaModelsCache = items;
+                    populateLLMModelSelect(items, status.model);
+                    if (modelSelect) modelSelect.style.display = '';
+                } else if (modelSelect) {
+                    modelSelect.style.display = 'none';
+                    modelSelect.innerHTML = '';
                 }
                 if (status.enabled && status.connected) {
                     indicator.className = 'status-dot-on';
@@ -1929,6 +1943,45 @@
             }
         }
 
+        function populateLLMModelSelect(items, selectedModel) {
+            const modelSelect = document.getElementById('llmModelSelect');
+            if (!modelSelect) return;
+            modelSelect.innerHTML = '';
+            const models = Array.isArray(items) ? items : [];
+            if (models.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No Ollama models';
+                modelSelect.appendChild(option);
+                modelSelect.disabled = true;
+                return;
+            }
+            modelSelect.disabled = false;
+            models.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.id;
+                option.textContent = item.label || item.id;
+                if (item.id === selectedModel) option.selected = true;
+                modelSelect.appendChild(option);
+            });
+            if (selectedModel && !models.some(item => item.id === selectedModel)) {
+                const option = document.createElement('option');
+                option.value = selectedModel;
+                option.textContent = `${selectedModel} (current)`;
+                option.selected = true;
+                modelSelect.appendChild(option);
+            }
+        }
+
+        async function fetchLLMModels(provider) {
+            const res = await apiFetch(`/llm/models?provider=${encodeURIComponent(provider)}`);
+            const payload = await res.json();
+            if (!res.ok) {
+                throw new Error((payload && (payload.detail || payload.error)) || `HTTP ${res.status}`);
+            }
+            return payload.items || [];
+        }
+
         async function changeLLMProvider() {
             const provider = document.getElementById('llmProviderSelect').value;
             try {
@@ -1937,10 +1990,34 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ provider })
                 });
+                if (provider === 'ollama') {
+                    ollamaModelsCache = await fetchLLMModels(provider);
+                }
                 fetchLLMStatus();
             } catch (e) {
                 console.error('Failed to switch LLM provider', e);
                 addEvent('error', 'LLM Switch Failed', e.message || 'Could not switch LLM provider');
+            }
+        }
+
+        async function changeLLMModel() {
+            const modelSelect = document.getElementById('llmModelSelect');
+            const model = modelSelect ? modelSelect.value : '';
+            if (!model) return;
+            try {
+                const res = await apiFetch('/llm/model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model })
+                });
+                const payload = await res.json();
+                if (!res.ok) {
+                    throw new Error((payload && (payload.detail || payload.error)) || `HTTP ${res.status}`);
+                }
+                fetchLLMStatus();
+            } catch (e) {
+                console.error('Failed to switch LLM model', e);
+                addEvent('error', 'LLM Model Switch Failed', e.message || 'Could not switch LLM model');
             }
         }
 
